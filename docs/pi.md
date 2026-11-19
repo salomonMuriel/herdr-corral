@@ -16,11 +16,12 @@ README.md, "Pi service", describes each part.
 
 ## Requirements
 
-- The box set up as in [docs/database.md](database.md), option 1 (Docker, Tailscale with
-  Tailscale SSH, MagicDNS and HTTPS certificates), and the `pi` block in the config.
+- The box set up as in [docs/database.md](database.md), option 1 (Docker usable without
+  sudo, Tailscale with Tailscale SSH, MagicDNS and HTTPS certificates), and the `pi` block
+  in the config with `"web": true`, which tells `herdr-approve` the web page exists.
 - Every machine accepts SSH from the box without a password, since the service follows
-  `hc events` on each one. Tailscale SSH does this on Linux; on macOS, add the box's public
-  key to `~/.ssh/authorized_keys` (with Remote Login on).
+  `hc events` on each one. Tailscale SSH does this on Linux. On macOS, turn on Remote Login
+  and add the key `scripts/deploy-pi` prints at the end to `~/.ssh/authorized_keys`.
 
 ## Set up
 
@@ -50,7 +51,8 @@ README.md, "Pi service", describes each part.
 
 ## A standby (optional)
 
-With the board on the box, one of your machines with Docker can keep a streaming copy. Add
+With the board on the box, one of your Linux machines with Docker can keep a streaming copy
+(Docker Desktop on macOS can't run it). Add
 the `standby` block from `examples/config.pi.example.json` (`host` is that machine's
 MagicDNS name, `dir` where its data lives) and run `scripts/deploy-standby` on that machine.
 When the box dies, `scripts/board-failover` there promotes the copy and points every

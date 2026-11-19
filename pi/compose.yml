@@ -1,7 +1,12 @@
-# scripts/deploy-pi copies this folder to the Pi and writes .env beside it (HERDR_TZ, HERDR_PI_HOST).
+# scripts/deploy-pi copies this folder to the Pi and writes .env beside it (HERDR_TZ, HERDR_PI_HOST,
+# HERDR_UID, HERDR_GID).
 services:
   herdr-pi:
-    build: .
+    build: &build
+      context: .
+      args:
+        HERDR_UID: ${HERDR_UID:-1000}
+        HERDR_GID: ${HERDR_GID:-1000}
     image: herdr-pi:local
     container_name: herdr-pi
     restart: unless-stopped
@@ -38,7 +43,7 @@ services:
 
   # Neon's /sql protocol in front of herdr-db, on 127.0.0.1:8097 for `tailscale serve`.
   herdr-sql:
-    build: .
+    build: *build
     image: herdr-pi:local
     container_name: herdr-sql
     restart: unless-stopped
@@ -60,7 +65,7 @@ services:
     command: serve
     restart: unless-stopped
     mem_limit: 128m
-    user: "1000:1000"
+    user: "${HERDR_UID:-1000}:${HERDR_GID:-1000}"
     environment:
       TZ: ${HERDR_TZ:-UTC}
       NTFY_BASE_URL: https://${HERDR_PI_HOST}:2586

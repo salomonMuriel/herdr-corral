@@ -45,7 +45,10 @@ def prune(folder: Path, keep: int = KEEP) -> list[Path]:
 async def dump(settings: Settings, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     process = await asyncio.create_subprocess_exec(
-        "pg_dump", "-Fc", "-d", database_conninfo(settings), "-f", str(target),
+        "pg_dump", "-Fc", "-h", "127.0.0.1", "-p", str(settings.db_port), "-U", "herdr", "-d", "herdr",
+        "-f", str(target),
+        # In the environment, so the password stays out of the box's process list.
+        env={**os.environ, "PGPASSWORD": os.environ.get("POSTGRES_PASSWORD", "")},
         stdin=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )

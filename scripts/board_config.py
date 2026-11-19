@@ -6,6 +6,7 @@ one already there, and a url of - is read from stdin so it stays out of the proc
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -14,8 +15,10 @@ def point(path: Path, host: str, url: str | None) -> None:
     config = json.loads(path.read_text())
     config["board"] = {"host": host, "url": url or config["board"]["url"]}
     part = path.with_name(path.name + ".part")
-    part.write_text(json.dumps(config, indent=2) + "\n")
-    part.chmod(0o600)
+    part.unlink(missing_ok=True)
+    # Private from the first byte: the file holds the board's password.
+    with os.fdopen(os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as file:
+        file.write(json.dumps(config, indent=2) + "\n")
     part.replace(path)
 
 

@@ -49,9 +49,12 @@ class Remote:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.known_hosts = settings.data_dir / "known_hosts"
+        self.identity = settings.data_dir / "id_ed25519"
 
     def ssh_argv(self, machine: MachineConfig, command: str) -> list[str]:
-        return ["ssh", *SSH_OPTIONS, "-o", f"UserKnownHostsFile={self.known_hosts}", machine.ssh, command]
+        # deploy-pi makes this key for machines without Tailscale SSH (macOS).
+        identity = ["-i", str(self.identity)] if self.identity.exists() else []
+        return ["ssh", *SSH_OPTIONS, *identity, "-o", f"UserKnownHostsFile={self.known_hosts}", machine.ssh, command]
 
     def argv(self, machine: MachineConfig, args: list[str]) -> list[str]:
         return self.ssh_argv(machine, hc_command(machine, args))

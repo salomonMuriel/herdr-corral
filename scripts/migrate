@@ -2,17 +2,37 @@
 # Bring the board's database up to date: apply the schema/*.sql files it doesn't have yet,
 # in order, and record each in schema_migrations. On an empty database that is
 # 0001_board.sql, which creates the whole board.
+#   --lock-down   also turn on row-level security on the board's tables (for Supabase)
 # Works with any Postgres 14+ that board.url reaches. Uses psql when it's installed,
 # otherwise psql from the postgres:18 Docker image.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-url="${HERDR_BOARD_URL:-$(python3 "$repo/scripts/herdr_config.py" get board.url)}"
+lock_down=false
+[[ "${1:-}" == "--lock-down" ]] && lock_down=true
+
+# The password travels in PGPASSWORD, never on a command line other users can see.
+split="$(python3 - "${HERDR_BOARD_URL:-$(python3 "$repo/scripts/herdr_config.py" get board.url)}" <<'PY'
+import sys
+from urllib.parse import unquote, urlsplit, urlunsplit
+
+parts = urlsplit(sys.argv[1])
+host = parts.hostname or ""
+if ":" in host:
+    host = f"[{host}]"
+netloc = f"{parts.username or ''}@{host}" + (f":{parts.port}" if parts.port else "")
+print(urlunsplit(parts._replace(netloc=netloc)))
+print(unquote(parts.password or ""))
+PY
+)"
+url="${split%%$'\n'*}"
+PGPASSWORD="${split#*$'\n'}"
+export PGPASSWORD
 
 if command -v psql >/dev/null 2>&1; then
   psql=(psql)
 elif command -v docker >/dev/null 2>&1; then
-  psql=(docker run --rm -i --network host postgres:18 psql)
+  psql=(docker run --rm -i --network host -e PGPASSWORD postgres:18 psql)
 else
   echo "Needs psql (brew install libpq, or apt install postgresql-client) or Docker." >&2
   exit 1
@@ -25,7 +45,8 @@ run_sql -c "set client_min_messages to warning" \
 
 # A board made before schema_migrations existed already has everything 0001 creates.
 run_sql -c "insert into schema_migrations (name)
-  select '0001_board.sql' where to_regclass('tasks') is not null and not exists (select 1 from schema_migrations)"
+  select '0001_board.sql' where to_regclass('task_events') is not null and to_regclass('coordinators') is not null
+    and not exists (select 1 from schema_migrations)"
 
 applied="$(run_sql -tA -c "select name from schema_migrations")"
 
@@ -36,4 +57,12 @@ for file in "$repo"/schema/*.sql; do
   run_sql < "$file"
   run_sql -c "insert into schema_migrations (name) values ('$name')"
 done
+
+if $lock_down; then
+  # No policies: APIs that log in as another role see nothing; the tables' owner keeps access.
+  for table in schema_migrations $(sed -n 's/^CREATE TABLE \([a-z_]*\).*/\1/p' "$repo"/schema/*.sql); do
+    run_sql -c "alter table $table enable row level security"
+  done
+  echo "Row-level security is on for the board's tables."
+fi
 echo "Board schema is up to date."

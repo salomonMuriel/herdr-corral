@@ -51,8 +51,9 @@ def load_config() -> dict[str, Any]:
 def pi_url() -> str | None:
     if os.environ.get("HERDR_PI_URL"):
         return os.environ["HERDR_PI_URL"].rstrip("/")
-    host = (load_config().get("pi") or {}).get("host")
-    return f"https://{host}:8096" if host else None
+    # pi.web is set once the full Pi service runs; a board-only Pi has no page to ask.
+    pi = load_config().get("pi") or {}
+    return f"https://{pi['host']}:8096" if pi.get("web") and pi.get("host") else None
 
 
 def machine_name() -> str:

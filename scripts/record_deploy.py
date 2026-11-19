@@ -2,23 +2,20 @@
 
 import json
 import sys
+import urllib.error
 import urllib.request
-from pathlib import Path
 
-from herdr_config import sql_endpoint
-
-CONFIG_PATH = Path.home() / ".config/herdr-board/config.json"
+import herdr_config
 
 
 def record(sha: str, machine: str) -> None:
-    config = json.loads(CONFIG_PATH.read_text())
-    board = config["board"]
+    board = herdr_config.load()["board"]
     body = json.dumps({
         "query": "insert into deployments (sha, deployed_by) values ($1, $2)",
         "params": [sha, machine],
     }).encode()
     request = urllib.request.Request(
-        sql_endpoint(board['host']),
+        herdr_config.sql_endpoint(board["host"]),
         data=body,
         headers={"Content-Type": "application/json", "Neon-Connection-String": board["url"]},
         method="POST",
@@ -30,4 +27,7 @@ def record(sha: str, machine: str) -> None:
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit("usage: record_deploy.py <sha> <machine>")
-    record(sys.argv[1], sys.argv[2])
+    try:
+        record(sys.argv[1], sys.argv[2])
+    except (OSError, KeyError, ValueError) as error:
+        sys.exit(f"couldn't record the deploy on the board: {error}")

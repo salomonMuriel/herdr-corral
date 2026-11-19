@@ -36,14 +36,23 @@ done
 [[ -n "$health" ]] || { echo "The gateway didn't answer on :$port; see: docker logs herdr-gateway" >&2; exit 1; }
 echo "gateway is up: $health"
 
-if command -v tailscale >/dev/null 2>&1 && tailscale serve --bg --https=$port "http://127.0.0.1:$port" >/dev/null; then
+machine_count="$(python3 "$config" machines | wc -l | tr -d ' ')"
+if command -v tailscale >/dev/null 2>&1; then
+  if ! tailscale serve --bg --https=$port "http://127.0.0.1:$port" >/dev/null; then
+    echo "tailscale serve failed. Turn on HTTPS certificates for the tailnet (admin console, DNS page) and run this again." >&2
+    exit 1
+  fi
   name="$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
   host="$name:$port"
+elif (( machine_count > 1 )); then
+  echo "No tailscale command here, so the other machines couldn't reach the gateway. Install Tailscale's CLI or run this on another machine." >&2
+  exit 1
 else
   host="http://127.0.0.1:$port"
-  echo "No Tailscale here, so only this machine reaches the gateway." >&2
+  echo "No Tailscale here; fine for a single machine, which reaches the gateway locally."
 fi
 
 python3 "$repo/scripts/board_config.py" "$board_config" "$host"
 echo "board.host is now $host in $board_config."
-[[ "$host" == http://127.0.0.1* ]] || echo "Copy that file to your other machines."
+(( machine_count > 1 )) && echo "Copy that file to your other machines."
+exit 0

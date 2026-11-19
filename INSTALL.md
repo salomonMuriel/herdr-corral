@@ -32,9 +32,10 @@ as they are, and `ctrl-alt-shift-escape` always goes back to Herdr's default lay
    1. their own always-on box (a Raspberry Pi, a NAS, a home server) running Postgres,
       which is how the maintainers run it;
    2. Neon, if they want nothing to run;
-   3. Supabase or a Postgres they already have.
+   3. Supabase or a Postgres server they already have.
 
-   [docs/database.md](docs/database.md) compares them.
+   Whichever they pick, the board gets a database of its own, never one an app uses.
+   [docs/database.md](docs/database.md) compares the options.
 4. How many agents may run at once on each machine? Default 4. A big desktop can take 8.
 5. Fork or clone? Clone upstream to use it as is; fork it first if they want to
    customize it (deploys only ship what is pushed to the clone's `origin/main`).
@@ -71,12 +72,20 @@ alerts and web page) are reached through it too.
 1. **(person)** Create a Tailscale account if they have none, then install Tailscale on
    every machine and log in to the same account (https://tailscale.com/download).
 2. In the admin console (https://login.tailscale.com/admin/dns) **(person)**: turn on
-   MagicDNS, and HTTPS certificates if the board will live on their own box.
-3. Enable Tailscale SSH on each Linux machine: `sudo tailscale up --ssh`. On macOS the App
+   MagicDNS, and HTTPS certificates unless the board will be on Neon.
+3. In the admin console's Access controls **(person)**: the default SSH rule has
+   `"action": "check"`, which asks for a browser login every 12 hours and makes scripts and
+   herdr-core hang. Change it to `accept`:
+
+   ```json
+   "ssh": [{ "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot"] }]
+   ```
+
+4. Enable Tailscale SSH on each Linux machine: `sudo tailscale up --ssh`. On macOS the App
    Store app can't serve SSH; turn on Remote Login (System Settings → General → Sharing)
    and add the other machines' public keys to `~/.ssh/authorized_keys`, or use the
    open-source `tailscaled` (`brew install tailscale`), which can.
-4. Check from each machine to each other one: `tailscale status` lists them, and
+5. Check from each machine to each other one: `tailscale status` lists them, and
    `ssh -o BatchMode=yes <user>@<machine> true` returns without a prompt.
 
 Use each machine's MagicDNS name (`desk`, or `desk.your-tailnet.ts.net`) as its SSH host
@@ -140,6 +149,7 @@ With one machine, `machines` and `hosts` have one entry each (its `ssh` can be l
 | `hosts.<name>.slots` | tasks that may run there at once (default 4) |
 | `board.host`, `board.url` | step 6 |
 | `pi` | the board's box, with option 1 of step 6 |
+| `cleanup.neon_projects` | Neon projects (names or ids) whose branches cleanup may delete; none when unset |
 
 Verify: `python3 ~/git/herdr-projects/scripts/herdr_config.py self` prints this machine's
 name, the same one used in `hosts`.
@@ -187,8 +197,8 @@ cd ~/git/herdr-projects && scripts/migrate
 
 On an empty database it applies `schema/0001_board.sql`, which creates the whole board,
 and records it in `schema_migrations`. Run it again after updates; it only applies files the
-board doesn't have yet. On Supabase, run the row-level security step from
-docs/database.md now.
+board doesn't have yet. On Supabase, run `scripts/migrate --lock-down` instead, which also
+turns on row-level security on the board's tables (docs/database.md explains why).
 
 ## 9. Deploy (once, any machine)
 

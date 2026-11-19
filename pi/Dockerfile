@@ -10,8 +10,11 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends postgresql-client-18 \
     && rm -rf /var/lib/apt/lists/*
-# ssh refuses to run for a uid with no passwd entry; 1000 matches the Pi user that owns ./data.
-RUN useradd --uid 1000 --create-home herdr
+# ssh refuses to run for a uid with no passwd entry. deploy-pi passes the box user's ids, so
+# the container can write ./data, which that user owns.
+ARG HERDR_UID=1000
+ARG HERDR_GID=1000
+RUN groupadd -o -g "$HERDR_GID" herdr && useradd -o --uid "$HERDR_UID" --gid "$HERDR_GID" --create-home herdr
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never

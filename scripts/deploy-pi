@@ -43,7 +43,9 @@ trap 'rm -rf "$build"' EXIT
 git -C "$repo" archive origin/main pi | tar -x -C "$build"
 $board_only || cp "$pi_settings" "$build/pi/config.toml"
 printf '%s %s %s\n' "${sha:0:7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname -s)" > "$build/pi/VERSION"
-printf 'HERDR_TZ=%s\nHERDR_PI_HOST=%s\n' "${HERDR_TZ:-$(ssh "$host" 'cat /etc/timezone 2>/dev/null || echo UTC')}" "$pi_host" > "$build/pi/.env"
+printf 'HERDR_TZ=%s\nHERDR_PI_HOST=%s\nHERDR_UID=%s\nHERDR_GID=%s\n' \
+  "${HERDR_TZ:-$(ssh "$host" 'cat /etc/timezone 2>/dev/null || echo UTC')}" "$pi_host" \
+  "$(ssh "$host" 'id -u')" "$(ssh "$host" 'id -g')" > "$build/pi/.env"
 
 ssh "$host" "mkdir -p ~/$dest/data/ntfy ~/$dest/data/postgres"
 # The board's database passwords, made once. A standby copies this file.
@@ -58,6 +60,8 @@ else
   # The web page adds tasks to the board with the same credentials as the machines.
   # macOS's openrsync has no --chmod, and umask keeps the file private from its first byte.
   [[ -f "$board_config" ]] && ssh "$host" "umask 077 && cat > ~/$dest/data/board.json" < "$board_config"
+  # Its key for machines that take ordinary SSH keys rather than Tailscale SSH.
+  ssh "$host" "test -f ~/$dest/data/id_ed25519 || ssh-keygen -q -t ed25519 -N '' -C herdr-pi -f ~/$dest/data/id_ed25519"
   ssh "$host" "cd ~/$dest && docker compose up -d --build"
   # The page answers only the logins in pi.toml's web_logins.
   ssh "$host" "tailscale serve --bg --https=$web_port http://127.0.0.1:$web_port >/dev/null"
@@ -84,6 +88,8 @@ wait_for herdr-sql "http://127.0.0.1:$sql_port/health"
 if ! $board_only; then
   wait_for herdr-pi "http://127.0.0.1:$port/health"
   echo "web page: https://$pi_host:$web_port"
+  echo "For machines without Tailscale SSH, add this key to their ~/.ssh/authorized_keys:"
+  ssh "$host" "cat ~/$dest/data/id_ed25519.pub"
 fi
 
 if $set_board; then

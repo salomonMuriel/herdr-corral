@@ -52,7 +52,7 @@ def scan_all(should_fetch: bool, skipped: dict[str, str]) -> list[Worktree]:
 
 def neon_branches(skipped: dict[str, str]) -> list[NeonBranch]:
     if not neon.available():
-        skip(skipped, "neon", "neonctl not found")
+        skip(skipped, "neon", neon.UNCONFIGURED)
         return []
     try:
         return neon.all_branches()

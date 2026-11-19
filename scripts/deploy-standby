@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and start the board's standby on this machine from origin/main's pi/ and standby/
+# Build and start the board's standby on this Linux machine from origin/main's pi/ and standby/
 # folders. The first run copies the Pi's database with pg_basebackup. Optional: the board
 # works without one.
 set -euo pipefail
@@ -44,15 +44,15 @@ set +a
 # The data folder belongs to the container's postgres user, so look from inside one.
 if ! docker run --rm -v "$data/postgres:/var/lib/postgresql:ro" postgres:18 \
     test -f /var/lib/postgresql/18/docker/PG_VERSION; then
-  existing="$(docker run --rm --network host -e PGPASSWORD="$POSTGRES_PASSWORD" postgres:18 \
+  existing="$(PGPASSWORD="$POSTGRES_PASSWORD" docker run --rm --network host -e PGPASSWORD postgres:18 \
     psql -h "$primary" -p "$db_port" -U herdr -d herdr -tAc \
     "select count(*) from pg_replication_slots where slot_name = '$slot'")"
-  create_slot=(-C)
-  [[ "$existing" == "1" ]] && create_slot=()
+  create_slot=-C
+  [[ "$existing" == "1" ]] && create_slot=""
   echo "Copying the board from $primary..."
-  docker run --rm --network host -e PGPASSWORD="$REPLICATOR_PASSWORD" \
+  PGPASSWORD="$REPLICATOR_PASSWORD" docker run --rm --network host -e PGPASSWORD \
     -v "$data/postgres:/var/lib/postgresql" postgres:18 bash -c \
-    "pg_basebackup -h $primary -p $db_port -U replicator -D /var/lib/postgresql/18/docker -R -X stream -S $slot ${create_slot[*]} \
+    "pg_basebackup -h $primary -p $db_port -U replicator -D /var/lib/postgresql/18/docker -R -X stream -S $slot $create_slot \
      && chown -R postgres:postgres /var/lib/postgresql/18"
 fi
 

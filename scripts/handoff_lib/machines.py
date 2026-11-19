@@ -1,11 +1,10 @@
 import json
 import shutil
-import socket
 import subprocess
-from functools import cache
 from pathlib import Path
 
-BOARD_CONFIG = Path.home() / ".config/herdr-board/config.json"
+import herdr_config
+
 LOCAL_BIN = Path.home() / ".local/bin"
 
 
@@ -20,16 +19,12 @@ def tool(name: str) -> str:
     return found
 
 
-@cache
 def board_config() -> dict:
-    return json.loads(BOARD_CONFIG.read_text())
+    return herdr_config.load()
 
 
-@cache
 def self_name() -> str:
-    host = socket.gethostname()
-    names = board_config().get("machines") or {}
-    return names.get(host) or names.get(host.split(".")[0]) or host.split(".")[0]
+    return herdr_config.self_name()
 
 
 def known_machines() -> list[str]:

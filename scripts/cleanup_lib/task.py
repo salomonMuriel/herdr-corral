@@ -80,7 +80,7 @@ def judge(repo: str, path: str, branch: str) -> Verdict | None:
 
 def neon_cleanup(branch: str) -> list[str]:
     if not neon.available():
-        return ["Neon not checked: neonctl not found"]
+        return [f"Neon not checked: {neon.UNCONFIGURED}"]
     try:
         branches = neon.all_branches()
     except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:

@@ -2,7 +2,10 @@ import json
 import shutil
 import subprocess
 
+import herdr_config
 from cleanup_lib.models import NeonBranch
+
+UNCONFIGURED = "neonctl not found or cleanup.neon_projects not set"
 
 
 def neonctl_json(args: list[str]) -> list[dict] | dict:
@@ -13,15 +16,21 @@ def neonctl_json(args: list[str]) -> list[dict] | dict:
     return json.loads(result.stdout)
 
 
+# Only projects named in the config are touched: neonctl may see a whole organization's.
+def allowed_projects() -> set[str]:
+    return set(herdr_config.get("cleanup.neon_projects", []) or [])
+
+
 def available() -> bool:
-    return shutil.which("neonctl") is not None
+    return shutil.which("neonctl") is not None and bool(allowed_projects())
 
 
 def projects() -> list[dict]:
-    found = []
+    allowed = allowed_projects()
+    found = {project["id"]: project for project in neonctl_json(["projects", "list"])}
     for org in neonctl_json(["orgs", "list"]):
-        found.extend(neonctl_json(["projects", "list", "--org-id", org["id"]]))
-    return found
+        found.update({project["id"]: project for project in neonctl_json(["projects", "list", "--org-id", org["id"]])})
+    return [project for project in found.values() if project["id"] in allowed or project["name"] in allowed]
 
 
 def project_branches(project: dict) -> list[NeonBranch]:

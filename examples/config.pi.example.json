@@ -2,7 +2,8 @@
   "pi": {
     "ssh": "you@pi",
     "host": "pi.your-tailnet.ts.net",
-    "dir": "herdr-pi"
+    "dir": "herdr-pi",
+    "web": true
   },
   "standby": {
     "host": "desk.your-tailnet.ts.net",

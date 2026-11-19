@@ -223,7 +223,7 @@ The new tab opens in the repo's space on the target, the card (or the task's row
 
 ## Cleanup
 
-`scripts/cleanup` lists agent worktrees on every machine (`~/git/**/.claude/worktrees/*`, `~/.herdr/worktrees/*/*`) and Neon branches with size, age and a verdict. It is a dry run; `--apply` asks which of the numbered items to remove. Needs `uv` and `gh` on the machine that runs it, and `neonctl` to include Neon branches (skipped without it).
+`scripts/cleanup` lists agent worktrees on every machine (`~/git/**/.claude/worktrees/*`, `~/.herdr/worktrees/*/*`) and Neon branches with size, age and a verdict. It is a dry run; `--apply` asks which of the numbered items to remove. Needs `uv` and `gh` on the machine that runs it. Neon branches are included only with `neonctl` installed and the projects named in `cleanup.neon_projects` in the config; branches in other projects are never touched.
 
 - A worktree is safe when it is clean, no process sits inside it, any session lock is stale, and its HEAD is in `origin/<default>` or in a merged PR's head (squash merges). Its local branch goes with it.
 - A Neon branch is safe when its name matches a merged PR branch, a closed PR branch that no longer exists, or a done task's title (with or without the `worktree-` prefix). Default, long-lived and parent branches are kept.
@@ -241,7 +241,7 @@ The worktree waits for the merge and uses `scripts/task-cleanup` with the same r
 
 ## Pi service
 
-`pi/` is `herdr-pi`, a Python service in Docker on the Pi. It follows `hc events` on every machine in its config (`~/.config/herdr-board/pi.toml` on the machine you deploy from, see `pi/config.example.toml`) over ssh (`ssh <machine> ~/.local/bin/hc …`) and keeps every terminal's latest state in memory, saved to `data/agents.json` each minute. A stream that goes quiet past two heartbeats or drops is reopened, and the fresh snapshot replaces what that machine had. Each machine's own terminals come from its own stream; the copies of other machines' terminals that `hc events` relays are skipped.
+`pi/` is `herdr-pi`, a Python service in Docker on the Pi. It follows `hc events` on every machine in its config (`~/.config/herdr-board/pi.toml` on the machine you deploy from, see `pi/config.example.toml`) over ssh (`ssh <machine> ~/.local/bin/hc …`), with Tailscale SSH or the key `scripts/deploy-pi` makes in `data/id_ed25519`, and keeps every terminal's latest state in memory, saved to `data/agents.json` each minute. A stream that goes quiet past two heartbeats or drops is reopened, and the fresh snapshot replaces what that machine had. Each machine's own terminals come from its own stream; the copies of other machines' terminals that `hc events` relays are skipped.
 
 Jobs that belong to no machine run here, each on its own schedule (`every` seconds or `daily_at` Pi time) and never twice at once. Add one in `pi/src/herdr_pi/service.py`. `cleanup` is the nightly cleanup above; `cleanup_at` and `cleanup_command` in `pi.toml` override its time and command, and `POST /jobs/cleanup/run` runs it now. `board-backup` is described under Board database.
 
@@ -260,7 +260,7 @@ Every client speaks Neon's HTTP `/sql` protocol (one query, or `queries` run as 
 - Neon answers `/sql` itself. Nothing to run.
 - For Supabase or any other Postgres, `scripts/deploy-gateway` runs the gateway in Docker on an always-on machine, from `HERDR_DATABASE_URL` (the config's `board.url`), published on the tailnet when Tailscale is there.
 
-`schema/0001_board.sql` creates the whole board; `scripts/migrate` applies it and any later files once, recorded in `schema_migrations`.
+`schema/0001_board.sql` creates the whole board; `scripts/migrate` applies it and any later files once, recorded in `schema_migrations`, and stops when the database already has tables by those names. `--lock-down` also turns on row-level security on the board's tables, for Supabase's Data API. The password goes to `psql` in `PGPASSWORD`, never on its command line.
 
 On the Pi: `herdr-db` (Postgres 18) on `127.0.0.1:5440`, in UTC, with `herdr-sql` in front of it answering the same protocol at `https://<pi host>:8097`. It's reachable on the tailnet only, through `tailscale serve`. A request's `Neon-Connection-String` header must carry the database password. `scripts/deploy-pi` brings both up and the first time creates `data/db.env` with the `herdr` and `replicator` passwords.
 
@@ -295,7 +295,7 @@ The page has its own listener on `127.0.0.1:8096`, published with `tailscale ser
 
 ### Approvals
 
-When Claude Code asks for permission in a Herdr terminal, `herdr-approve` posts the request to the web page (`POST /api/approvals`, through the same `tailscale serve` address and login check) and waits up to 900 s for an answer. Claude Code shows its own prompt the whole time and takes whichever answer comes first. The agent's card on the page shows the tool, what it runs or touches, and Allow, Always allow (the rule the prompt would save, when it offers one) and Deny with an optional reason. With no answer in time, or no Pi, the hook prints nothing and the prompt stays.
+When Claude Code asks for permission in a Herdr terminal, `herdr-approve` posts the request to the web page (`POST /api/approvals`, through the same `tailscale serve` address and login check) and waits up to 900 s for an answer. Claude Code shows its own prompt the whole time and takes whichever answer comes first. The agent's card on the page shows the tool, what it runs or touches, and Allow, Always allow (the rule the prompt would save, when it offers one) and Deny with an optional reason. With no answer in time, or no web page (`pi.web` unset in the config), the hook prints nothing and the prompt stays.
 
 Answering in the terminal withdraws the request: the Pi drops it once the agent leaves blocked, and the hook withdraws it when Claude Code ends it. Questions and plan approvals are left to the card's keys. The hook's errors go to `~/.cache/herdr-projects/approve.log`; `HERDR_PI_URL` and `HERDR_MACHINE` override the address and the machine name.
 

@@ -1,7 +1,8 @@
 # Where the board lives
 
 The board is one Postgres database (14 or newer) that every machine shares. Any Postgres
-works. Clients reach it over HTTP in Neon's `/sql` format, because the Herdr mod can make
+works. Give the board a database of its own: `scripts/migrate` creates tables with common
+names such as `projects` and `tasks`, and stops if they already exist. Clients reach it over HTTP in Neon's `/sql` format, because the Herdr mod can make
 HTTP requests but can't open a database connection. Neon answers that format itself. Any
 other Postgres gets `herdr-sql`, a small gateway in this repo, in front of it.
 
@@ -34,8 +35,10 @@ Tailscale. Any always-on Linux box with Docker on your tailnet works, including 
 your own machines if it never sleeps.
 
 **(person)** Once, on the box: install Docker (with the compose plugin) and Tailscale, join
-the tailnet, and enable Tailscale SSH (`sudo tailscale up --ssh`). In the Tailscale admin
-console, turn on MagicDNS and HTTPS certificates (DNS page).
+the tailnet, and enable Tailscale SSH (`sudo tailscale up --ssh`). Let the box's user run
+Docker without sudo (`sudo usermod -aG docker $USER`, then log in again). In the Tailscale
+admin console, turn on MagicDNS and HTTPS certificates (DNS page), and set the SSH rule to
+`accept` (INSTALL.md step 2).
 
 On your machine, add the box to the config:
 
@@ -79,9 +82,13 @@ Use the direct connection string, not the `-pooler` one:
 `host` is only the host part of the string. Neon answers `/sql` itself, so there's nothing
 to run.
 
+Cleanup can also delete the Neon branches your projects' agents create, but only in the
+projects listed in `cleanup.neon_projects` in the config. Leave the board's own project out.
+
 ## 3. Supabase
 
-**(person)** Create a project at [supabase.com](https://supabase.com). Under Connect, copy
+**(person)** Create a new project at [supabase.com](https://supabase.com) for the board
+alone. Under Connect, copy
 the Session pooler connection string (the direct one is IPv6-only on most plans):
 
 ```
@@ -98,15 +105,9 @@ cd ~/git/herdr-projects && scripts/deploy-gateway
 It writes `board.host` for you.
 
 Supabase serves the `public` schema through its Data API to anyone holding the project's
-anon key. After `scripts/migrate` (INSTALL.md step 8), turn on row-level security on the
-board's tables, which blocks that API while the gateway, connecting as the tables' owner,
-keeps full access:
-
-```sh
-psql "$(python3 scripts/herdr_config.py get board.url)" -f examples/supabase-rls.sql
-```
-
-Run it again after a migration adds tables.
+anon key. At INSTALL.md step 8, run `scripts/migrate --lock-down`: it turns on row-level
+security on the board's tables, which blocks that API while the gateway, connecting as the
+tables' owner, keeps full access. Use `--lock-down` again whenever you migrate.
 
 ## 4. Any other Postgres
 
@@ -115,9 +116,10 @@ machine with Docker that can reach it, as for Supabase. Add `?sslmode=require` w
 server is on the internet.
 
 `deploy-gateway` runs the gateway in Docker under `~/herdr-gateway`. With Tailscale on that
-machine it publishes it on the tailnet at `https://<machine>.<tailnet>.ts.net:8097`; without
-Tailscale, only that machine reaches it (`http://127.0.0.1:8097`), which suits a
-single-machine setup. A Postgres on the gateway's own machine must accept connections from
+machine it publishes it on the tailnet at `https://<machine>.<tailnet>.ts.net:8097`, which
+needs HTTPS certificates turned on for the tailnet; it stops with an error if publishing
+fails. Without Tailscale, only that machine reaches it (`http://127.0.0.1:8097`), so it
+refuses unless the config lists a single machine. A Postgres on the gateway's own machine must accept connections from
 Docker, not only from `127.0.0.1`; use `host.docker.internal` as its host in `board.url`.
 `HERDR_GATEWAY_PORT` picks another port.
 

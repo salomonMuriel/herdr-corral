@@ -5,8 +5,7 @@
 web_logins = ["you@example.com"]
 
 # Machines the service follows. `ssh` is the destination as the Pi reaches it over the
-# tailnet (Tailscale SSH, so no keys to manage); `hc` is spelled out because non-interactive
-# ssh shells don't have ~/.local/bin.
+# tailnet. An optional `hc` gives the path to hc there (default ~/.local/bin/hc).
 
 [[machines]]
 name = "desk"

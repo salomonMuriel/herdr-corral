@@ -140,8 +140,11 @@ for machine in ${targets[@]+"${targets[@]}"}; do
 done
 
 if ! $local_only && (( ${#deployed[@]} )); then
-  python3 "$repo/scripts/record_deploy.py" "$sha" "$self"
-  echo "Recorded main ${sha:0:7}"
+  if python3 "$repo/scripts/record_deploy.py" "$sha" "$self"; then
+    echo "Recorded main ${sha:0:7}"
+  else
+    echo "Deployed, but windows won't catch up until it's recorded: python3 scripts/record_deploy.py $sha $self" >&2
+  fi
 fi
 
 if (( ${#failed[@]} )); then
