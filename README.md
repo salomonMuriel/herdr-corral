@@ -8,15 +8,15 @@ optional code-review pass before a card reaches you.
 
 What's in it:
 
-- **The `projects` mod**: a sidebar of projects > repos > sessions with live agent status,
+- The `projects` mod: a sidebar of projects > repos > sessions with live agent status,
   a board per project (To do, In progress, Review, Done) with dependencies and runs, a
   Today view, a coordinator agent per project, and GitHub issues on the board.
-- **`hb`**: the CLI agents report with (`hb done`, `hb ask`, `hb note`, `hb add`).
-- **A run guard** for unattended agents: a Claude Code hook that refuses deploys, force
+- `hb`, the CLI agents report with (`hb done`, `hb ask`, `hb note`, `hb add`).
+- A run guard for unattended agents: a Claude Code hook that refuses deploys, force
   pushes, destructive SQL and writes outside the task's worktree.
-- **Cleanup** of merged worktrees, branches and Neon branches, by task and nightly.
-- **Handoff**: move a running Claude Code session, with its conversation, to another machine.
-- **`herdr-pi`** (optional): an always-on service for phone alerts, a tailnet web page
+- Cleanup of merged worktrees, branches and Neon branches, per task and nightly.
+- Handoff, which moves a running Claude Code session and its conversation to another machine.
+- `herdr-pi` (optional), an always-on service for phone alerts, a tailnet web page
   to answer agents and approve permission prompts, a nightly cleanup, backups and a
   daily digest, next to the board's Postgres.
 
@@ -24,24 +24,24 @@ What's in it:
 
 Required:
 
-- **[Herdr](https://herdr.dev)** on every machine: the desktop app (`herdr-app`), whose mods
+- [Herdr](https://herdr.dev) on every machine: the desktop app (`herdr-app`), whose mods
   this repo adds, and herdr-core (`hc`), which runs the terminals and agents and links the
   machines.
-- **Postgres** for the shared board, reached over HTTP: [Neon](https://neon.tech) natively,
+- Postgres for the shared board, reached over HTTP: [Neon](https://neon.tech) natively,
   any other Postgres through `herdr-sql`, the gateway in `pi/`
   ([docs/database.md](docs/database.md)).
-- **[Claude Code](https://claude.com/claude-code)** for task agents, the run guard and
+- [Claude Code](https://claude.com/claude-code) for task agents, the run guard and
   code review (hooks in `~/.claude/settings.json`). Codex works for sessions started by hand.
-- **git and GitHub** with the [`gh`](https://cli.github.com) CLI: worktrees per task, PR and
+- git and GitHub, with the [`gh`](https://cli.github.com) CLI: worktrees per task, PR and
   CI badges, issues on the board, repo creation.
-- **Python 3.10+ and [uv](https://docs.astral.sh/uv/)** for `hb`, the hooks and the scripts.
+- Python 3.10+ and [uv](https://docs.astral.sh/uv/) for `hb`, the hooks and the scripts.
 
 Recommended:
 
-- **[Tailscale](https://tailscale.com)** to link the machines: SSH between them for
+- [Tailscale](https://tailscale.com) to link the machines: SSH between them for
   herdr-core and deploys, MagicDNS names, and HTTPS for the board and the web page
   without exposing anything to the internet.
-- **An always-on box with Docker** (a Raspberry Pi is plenty) for the board's Postgres and,
+- An always-on box with Docker (a Raspberry Pi is plenty) for the board's Postgres and,
   optionally, the `herdr-pi` service: phone alerts through self-hosted
   [ntfy](https://ntfy.sh), the web page, backups and the digest.
 
@@ -51,25 +51,24 @@ Neon database branches your projects' agents create.
 The mod is JavaScript for Herdr's runtime; the service and the scripts are Python (FastAPI,
 psycopg, Pydantic); deploys are bash and rsync over SSH.
 
-**Install: see [INSTALL.md](INSTALL.md).** The rest of this file describes how it works.
-The examples below use two machines named `desk` (Linux) and `laptop` (macOS); yours come
+To install, follow [INSTALL.md](INSTALL.md). The examples below use two machines named `desk` (Linux) and `laptop` (macOS); yours come
 from `~/.config/herdr-board/config.json`.
 
 ## How it fits together
 
-- **Herdr window** (one per machine, layout `projects-dracula`): the `projects` mod draws the sidebar (a rail of project marks, split by short rules into companies, clients and side projects, beside a project > repo > session tree; a project's mark and tree row show its session count, and the row's `N open` counts its tasks that aren't Done), the board, Today and the top bar. Each window's leader pulls the board, starts run tasks for its own machine only, and cleans up after Done tasks on its own machine.
-- **herdr-core (`hc`)** on each machine runs every terminal and agent; every window sees every machine's sessions.
-- **Repos** live in `~/git/<repo>` on each machine unless a repo records its own folder. A repo grouped one folder down is named `<group>/<repo>` (`acme/frontend`), and the project dialog offers those next to the top-level folders. Typing a name that isn't a repo yet offers `Create <name>`: it runs `git init` in `~/git/<name>` on this machine and makes a private GitHub repo as its `origin`, owned by whoever owns the other repos in that group folder, or your account. A name without a group joins the group the project's repos share. Starting a session in a repo the machine doesn't have clones it there first, from the `origin` of a machine that has it (log: `~/.cache/herdr-projects/clone-<repo>.log`). An existing checkout is never pulled.
-- **The board** lives in Postgres (projects, repos, tasks, dependencies, runs, history): on the Pi with an optional standby, on Neon, or any other Postgres behind the `herdr-sql` gateway (see Board database). Every machine reads and writes it over HTTP with Neon's `/sql` protocol. Dialogs and popups don't write to it themselves: Herdr cancels a closed overlay's requests after 250 ms, too soon for a round trip, so they queue their writes and starts in shared state and the sidebar's leader sends them. A dropped project logo is read in the dialog and queued the same way. Nothing reads the board on a timer. A window pulls when it starts, when it comes forward and after every write made on its machine, by the window itself or by `hb` and `scripts/task-cleanup` (which run `herdr-app do projects.wrote`). After such a write it also tells the other machines' windows to pull (`herdr-app do projects.pull` over ssh). A pull that was already under way fetches again so it can't bring back older rows. An archived project's repos, tasks, runs and coordinator stay out of pulls, so its sessions show as not in a project.
-- **The Pi** is the always-on part, on any small Linux box with Docker on your tailnet: the board's database in the recommended setup and, optionally, `herdr-pi` for phone alerts (ntfy), the tailnet web page and approvals, the nightly cleanup, the board backup and the daily digest.
-- **Your clone of this repo** at `~/git/herdr-projects` on every machine is the source. Nothing is edited in `~/.config/herdr-app` directly: work is merged to `main` and `scripts/deploy` copies it to every machine in the config (`scripts/deploy-pi` for the Pi).
+- Herdr window (one per machine, layout `projects-dracula`): the `projects` mod draws the sidebar (a rail of project marks, split by short rules into companies, clients and side projects, beside a project > repo > session tree; a project's mark and tree row show its session count, and the row's `N open` counts its tasks that aren't Done), the board, Today and the top bar. Each window's leader pulls the board, starts run tasks for its own machine only, and cleans up after Done tasks on its own machine.
+- herdr-core (`hc`) on each machine runs every terminal and agent; every window sees every machine's sessions.
+- Repos live in `~/git/<repo>` on each machine unless a repo records its own folder. A repo grouped one folder down is named `<group>/<repo>` (`acme/frontend`), and the project dialog offers those next to the top-level folders. Typing a name that isn't a repo yet offers `Create <name>`: it runs `git init` in `~/git/<name>` on this machine and makes a private GitHub repo as its `origin`, owned by whoever owns the other repos in that group folder, or your account. A name without a group joins the group the project's repos share. Starting a session in a repo the machine doesn't have clones it there first, from the `origin` of a machine that has it (log: `~/.cache/herdr-projects/clone-<repo>.log`). An existing checkout is never pulled.
+- The board lives in Postgres (projects, repos, tasks, dependencies, runs, history): on the Pi with an optional standby, on Neon, or any other Postgres behind the `herdr-sql` gateway (see Board database). Every machine reads and writes it over HTTP with Neon's `/sql` protocol. Dialogs and popups don't write to it themselves: Herdr cancels a closed overlay's requests after 250 ms, too soon for a round trip, so they queue their writes and starts in shared state and the sidebar's leader sends them. A dropped project logo is read in the dialog and queued the same way. Nothing reads the board on a timer. A window pulls when it starts, when it comes forward and after every write made on its machine, by the window itself or by `hb` and `scripts/task-cleanup` (which run `herdr-app do projects.wrote`). After such a write it also tells the other machines' windows to pull (`herdr-app do projects.pull` over ssh). A pull that was already under way fetches again so it can't bring back older rows. An archived project's repos, tasks, runs and coordinator stay out of pulls, so its sessions show as not in a project.
+- The Pi is the always-on part, on any small Linux box with Docker on your tailnet: the board's database in the recommended setup and, optionally, `herdr-pi` for phone alerts (ntfy), the tailnet web page and approvals, the nightly cleanup, the board backup and the daily digest.
+- Your clone of this repo at `~/git/herdr-projects` on every machine is the source. Nothing is edited in `~/.config/herdr-app` directly: work is merged to `main` and `scripts/deploy` copies it to every machine in the config (`scripts/deploy-pi` for the Pi).
 
 ## Working day to day
 
 1. Add tasks to a project's board (by hand, from GitHub issues, `hb add` from an agent, or the coordinator). Set importance, the repos it touches and what it waits on.
-2. Click **Run this chain** on a To do card, or shift-click cards and **Run selected**. Pick the machine, agent, mode and review. Nothing starts without a click.
+2. Click Run this chain on a To do card, or shift-click cards and click Run selected. Pick the machine, agent, mode and review. Nothing starts without a click.
 3. Each task gets its own worktree and an unattended agent (see below). It reports with `hb note` / `hb ask` / `hb done`; with code review on, a `/code-review` pass runs before the card moves on.
-4. Cards in **Review** wait for you; the agent's session stays open until the card is Done. Open it (its row in the sidebar), ask for a write-up of the changes and decisions if it hasn't given one, push back there, and click **Approve** when you're happy. Tasks downstream start as their dependencies reach Done and merge.
+4. Cards in Review wait for you; the agent's session stays open until the card is Done. Open it (its row in the sidebar), ask for a write-up of the changes and decisions if it hasn't given one, push back there, and click Approve when you're happy. Tasks downstream start as their dependencies reach Done and merge.
 5. Deploy when you've reviewed: tell the reviewing agent "deploy it", or run `cd ~/git/herdr-projects && git pull --ff-only && scripts/deploy`. Finished sessions close and merged worktrees and Neon branches are removed on their own; `scripts/cleanup` lists what's left.
 
 ## Layout
@@ -257,9 +256,9 @@ The API listens on `127.0.0.1:8095` on the Pi:
 
 Every client speaks Neon's HTTP `/sql` protocol (one query, or `queries` run as one transaction) to `<board.host>/sql` (`https://` unless `board.host` names its scheme), because the mod can't open a database connection. `herdr-sql` (`pi/src/herdr_pi/sql_gateway.py`) answers that protocol in front of any Postgres: it checks the password in the request's `Neon-Connection-String` header against its own database's and uses no server-side prepared statements, so transaction poolers work. [docs/database.md](docs/database.md) sets up each option:
 
-- **The Pi** (recommended): `scripts/deploy-pi --board-only` runs Postgres and the gateway there; details below.
-- **Neon**: answers `/sql` itself. Nothing to run.
-- **Supabase or any other Postgres**: `scripts/deploy-gateway` runs the gateway in Docker on an always-on machine, from `HERDR_DATABASE_URL` (the config's `board.url`), published on the tailnet when Tailscale is there.
+- The Pi (recommended): `scripts/deploy-pi --board-only` runs Postgres and the gateway there; details below.
+- Neon answers `/sql` itself. Nothing to run.
+- For Supabase or any other Postgres, `scripts/deploy-gateway` runs the gateway in Docker on an always-on machine, from `HERDR_DATABASE_URL` (the config's `board.url`), published on the tailnet when Tailscale is there.
 
 `schema/0001_board.sql` creates the whole board; `scripts/migrate` applies it and any later files once, recorded in `schema_migrations`.
 
@@ -290,7 +289,7 @@ To get them, install the ntfy app on the phone (on the tailnet), add the server 
 
 ### Web page
 
-`https://<pi host>:8096` answers from phone or laptop over the tailnet. It lists the agents that need you (leaving out the ones with a `herdr.seen` or `herdr.snooze` label), blocked ones first, each with the last 30 lines of its screen, a reply box (`hc send`, with Send anyway when the agent is blocked) and buttons for prompt keys (`hc keys`: 1–4, arrows, Tab, Shift+Tab, Enter, Esc, Ctrl+C). Below them you can message any session or add a task to a project's To do. `/agents/<machine>/<address>` opens the page on that agent.
+`https://<pi host>:8096` answers from phone or laptop over the tailnet. It lists the agents that need you (leaving out the ones with a `herdr.seen` or `herdr.snooze` label), blocked ones first, each with the last 30 lines of its screen, a reply box (`hc send`, with Send anyway when the agent is blocked) and buttons for prompt keys (`hc keys`: 1 to 4, arrows, Tab, Shift+Tab, Enter, Esc, Ctrl+C). Below them you can message any session or add a task to a project's To do. `/agents/<machine>/<address>` opens the page on that agent.
 
 The page has its own listener on `127.0.0.1:8096`, published with `tailscale serve` (never funnel), so only tailnet devices reach it. It answers only the Tailscale logins in `web_logins` in `pi.toml`, read from the `Tailscale-User-Login` header serve adds; anyone else gets 403. Writes must be JSON from the page's own origin. `scripts/deploy-pi` sets up the serve entry and copies the deploying machine's `~/.config/herdr-board/config.json` to `data/board.json` on the Pi for adding tasks.
 
@@ -310,9 +309,9 @@ The board's address and credentials live outside the repo in `~/.config/herdr-bo
 
 ## When something is off
 
-- **A run doesn't start anything:** the window of the run's machine must be open on `projects-dracula`; runs start from that window. On a Linux machine it can be opened remotely: `ssh desk 'DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority setsid nohup ~/.local/bin/herdr-app >/tmp/herdr-app.log 2>&1 </dev/null &'`, then `herdr-app do layout.switch --name projects-dracula` there. A card's line says why a task waits (slots, an unmerged dependency, folder trust).
-- **An agent is stuck:** Needs you shows what it waits on; reply from the sidebar, the board card, or the Pi page. Text greyed out in an agent's input box is Claude Code's suggested next prompt, not something typed.
-- **A machine runs old code:** the sidebar footer shows the running commit; a window behind the latest deploy catches up when it comes forward (`~/.cache/herdr-projects/catch-up.log`).
-- **The window breaks after a deploy:** `ctrl-alt-shift-escape` switches to Herdr's default layout; fix on a branch, merge, deploy again. Run `herdr-app check <worktree>/mods/projects` before merging, and avoid circular imports between mod files (they crashed the window once).
-- **The Pi is down:** the board is down with it. If it won't come back soon, run `scripts/board-failover` on the standby's machine (see Board database).
-- **Logs:** `~/.cache/herdr-projects/` (task-cleanup, code-review, handoff, approve, catch-up).
+- A run doesn't start anything: the window of the run's machine must be open on `projects-dracula`; runs start from that window. On a Linux machine it can be opened remotely: `ssh desk 'DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority setsid nohup ~/.local/bin/herdr-app >/tmp/herdr-app.log 2>&1 </dev/null &'`, then `herdr-app do layout.switch --name projects-dracula` there. A card's line says why a task waits (slots, an unmerged dependency, folder trust).
+- An agent is stuck: Needs you shows what it waits on; reply from the sidebar, the board card, or the Pi page. Text greyed out in an agent's input box is Claude Code's suggested next prompt, not something typed.
+- A machine runs old code: the sidebar footer shows the running commit; a window behind the latest deploy catches up when it comes forward (`~/.cache/herdr-projects/catch-up.log`).
+- The window breaks after a deploy: `ctrl-alt-shift-escape` switches to Herdr's default layout; fix on a branch, merge, deploy again. Run `herdr-app check <worktree>/mods/projects` before merging, and avoid circular imports between mod files, which can crash the window.
+- The Pi is down: a board on the Pi is down with it. If it won't come back soon, run `scripts/board-failover` on the standby's machine (see Board database).
+- Logs are in `~/.cache/herdr-projects/` (task-cleanup, code-review, handoff, approve, catch-up).

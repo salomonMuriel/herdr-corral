@@ -20,7 +20,7 @@ clients send it to the gateway, which checks its password. `host` is a bare host
 
 | Option | Runs on | Gateway | Good for |
 | --- | --- | --- | --- |
-| **1. Your own box (recommended)** | Pi, NAS, home server, VPS on your tailnet | included | private, free, fast on the tailnet; adds alerts and the web page if you want them |
+| 1. Your own box (recommended) | Pi, NAS, home server, VPS on your tailnet | included | keeping the board on your tailnet at no cost; the same box can run alerts and the web page |
 | 2. Neon | Neon's cloud | not needed | nothing to run; free plan is enough |
 | 3. Supabase | Supabase's cloud | `scripts/deploy-gateway` | if you already use Supabase |
 | 4. Any other Postgres | RDS, Railway, Render, your own server | `scripts/deploy-gateway` | if you already run Postgres |
@@ -29,12 +29,12 @@ The gateway has to be up for the board to work, so run it on a machine that is a
 
 ## 1. Your own box (recommended)
 
-How the maintainers run it: Postgres 18 and the gateway in Docker on a Raspberry Pi, reached
-over Tailscale. Any always-on Linux box with Docker on your tailnet works, including one of
+The maintainers run Postgres 18 and the gateway in Docker on a Raspberry Pi, reached over
+Tailscale. Any always-on Linux box with Docker on your tailnet works, including one of
 your own machines if it never sleeps.
 
-On the box (**person**, once): install Docker (with the compose plugin) and Tailscale, join
-the tailnet, enable Tailscale SSH (`sudo tailscale up --ssh`). In the Tailscale admin
+**(person)** Once, on the box: install Docker (with the compose plugin) and Tailscale, join
+the tailnet, and enable Tailscale SSH (`sudo tailscale up --ssh`). In the Tailscale admin
 console, turn on MagicDNS and HTTPS certificates (DNS page).
 
 On your machine, add the box to the config:
@@ -51,8 +51,8 @@ cd ~/git/herdr-projects && scripts/deploy-pi --board-only --set-board
 
 It starts `herdr-db` and `herdr-sql` in `~/herdr-pi` on the box, generates the database
 passwords, publishes the gateway (`:8097`) and Postgres (`:5440`) on the tailnet only with
-`tailscale serve`, and writes the `board` block into this machine's config. The password is
-read over SSH and never printed.
+`tailscale serve`, and writes the `board` block into this machine's config. It reads the
+password over SSH and never prints it.
 
 Later, [docs/pi.md](pi.md) adds phone alerts, the web page, backups and a standby on the
 same box.
@@ -81,8 +81,8 @@ to run.
 
 ## 3. Supabase
 
-**(person)** Create a project at [supabase.com](https://supabase.com). Under **Connect**, copy
-the **Session pooler** connection string (the direct one is IPv6-only on most plans):
+**(person)** Create a project at [supabase.com](https://supabase.com). Under Connect, copy
+the Session pooler connection string (the direct one is IPv6-only on most plans):
 
 ```
 postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres

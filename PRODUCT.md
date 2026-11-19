@@ -14,7 +14,7 @@ One person juggling several projects at once (their own companies, client work, 
 
 ## Product Purpose
 
-A personal Herdr layout that turns a pile of terminals into an organized portfolio of work. The working unit is the project (a company, a client, a side project), split into subprojects (microservices, repos). Every agent session is listed under the project and subproject it works on, with its live status. Each project has a small shared task board that says what is missing, what is in progress and which agent is doing it.
+A Herdr layout that organizes agent sessions by project instead of by machine. The working unit is the project (a company, a client, a side project), split into subprojects (microservices, repos). Every agent session is listed under the project and subproject it works on, with its live status. Each project has a small shared task board that says what is missing, what is in progress and which agent is doing it.
 
 Success: at a glance, the person knows which agents need them, what each agent is working on, and what is left to do per project, from any machine.
 
@@ -30,7 +30,7 @@ Herdr's default groups work by machine and space. This layout groups by project 
 
 ## Capabilities and Constraints
 
-- Shared data (projects, subprojects, tasks) in Postgres (Neon, or self-hosted on a Pi), reached over HTTPS from the mods.
+- Shared data (projects, subprojects, tasks) in one Postgres database (self-hosted on a Pi, Neon, or any other), reached over HTTP from the mods.
 - Agent status words: working, blocked (needs the person), done (finished unseen), idle.
 - No horizontal tab bar: every session is a row in the left pane.
 - Task columns: To do, In progress, Review, Done.

@@ -1,4 +1,4 @@
-# The Pi: alerts, web page, backups
+# The Pi service
 
 Optional, after [INSTALL.md](../INSTALL.md). It runs on the always-on box that holds the
 board in the recommended setup ([docs/database.md](database.md), option 1), or on any other
@@ -16,8 +16,8 @@ README.md, "Pi service", describes each part.
 
 ## Requirements
 
-- The box set up as in [docs/database.md](database.md), option 1: Docker, Tailscale with
-  Tailscale SSH, MagicDNS and HTTPS certificates. The `pi` block in the config.
+- The box set up as in [docs/database.md](database.md), option 1 (Docker, Tailscale with
+  Tailscale SSH, MagicDNS and HTTPS certificates), and the `pi` block in the config.
 - Every machine accepts SSH from the box without a password, since the service follows
   `hc events` on each one. Tailscale SSH does this on Linux; on macOS, add the box's public
   key to `~/.ssh/authorized_keys` (with Remote Login on).

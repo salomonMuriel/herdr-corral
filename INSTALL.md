@@ -1,7 +1,7 @@
 # Installing herdr-projects
 
-Written so a coding agent can do the install for someone who already uses
-[Herdr](https://herdr.dev), on one machine or several. The shared board needs a Postgres
+A coding agent can follow these steps to install herdr-projects for someone who already
+uses [Herdr](https://herdr.dev), on one machine or several. The shared board needs a Postgres
 database: the recommended setup is Postgres on a small always-on box on your tailnet, and
 Neon, Supabase or any other Postgres work too ([docs/database.md](docs/database.md)).
 
@@ -17,26 +17,26 @@ as they are, and `ctrl-alt-shift-escape` always goes back to Herdr's default lay
 - Run `scripts/doctor` (`scripts/doctor --before-deploy` before step 9) whenever you want
   to know where things stand. Every failed check prints the command that fixes it. You're
   done when it prints `All good.` on every machine.
-- Steps marked *each machine* are repeated on every machine. Once the machines share a
+- Steps whose heading says "each machine" are repeated on every machine. Once the machines share a
   tailnet (step 2), you can run commands on another one with `ssh <target> '<command>'`.
 - Never commit `~/.config/herdr-board/config.json` or paste its contents anywhere: it
   holds the board's password.
 
 ## 0. Ask the person first (person)
 
-1. **Which machines?** For each one: a short name (`desk`, `laptop`) and its OS. A single
+1. Which machines? For each one: a short name (`desk`, `laptop`) and its OS. A single
    machine is fine.
-2. **A tailnet?** Recommended: every machine (and the board's box) on one
+2. A tailnet? Recommended: every machine (and the board's box) on one
    [Tailscale](https://tailscale.com) network. Do they have a Tailscale account?
-3. **Where should the board live?** Recommend, in this order:
+3. Where should the board live? Recommend, in this order:
    1. their own always-on box (a Raspberry Pi, a NAS, a home server) running Postgres,
       which is how the maintainers run it;
    2. Neon, if they want nothing to run;
    3. Supabase or a Postgres they already have.
 
    [docs/database.md](docs/database.md) compares them.
-4. **How many agents may run at once on each machine?** Default 4. A big desktop can take 8.
-5. **Fork or clone?** Clone upstream to use it as is; fork it first if they want to
+4. How many agents may run at once on each machine? Default 4. A big desktop can take 8.
+5. Fork or clone? Clone upstream to use it as is; fork it first if they want to
    customize it (deploys only ship what is pushed to the clone's `origin/main`).
 
 ## 1. Prerequisites (each machine)
@@ -149,10 +149,10 @@ name, the same one used in `hosts`.
 Follow the option the person picked in [docs/database.md](docs/database.md). Each one ends
 with `board.host` and `board.url` filled in on this machine:
 
-- **Own box (recommended):** set it up as described there, add the `pi` block, then
+- Own box (recommended): set it up as described there, add the `pi` block, then
   `scripts/deploy-pi --board-only --set-board`.
-- **Neon:** create a project and paste its host and connection string.
-- **Supabase or any other Postgres:** paste its connection string into `board.url`, then
+- Neon: create a project and paste its host and connection string.
+- Supabase or any other Postgres: paste its connection string into `board.url`, then
   `scripts/deploy-gateway` on an always-on machine with Docker.
 
 Then copy the finished config to every other machine and lock it down there:
@@ -219,7 +219,7 @@ agents in and accept, or the first task there waits on "Waiting for folder trust
 Walk the person through a first task:
 
 1. In the sidebar, add a project and one of their repos to it.
-2. Open the board, add a task with a small, real change, and click **Run this chain**.
+2. Open the board, add a task with a small, real change, and click Run this chain.
 3. An agent starts on a new branch in its own worktree. When it runs `hb done`, the card
    moves to Review and its session waits for them.
 
@@ -244,7 +244,7 @@ backup, an end-of-day digest and a standby copy of the board.
 
 ## Adding a machine later
 
-On the new machine do steps 1–4, add it to `machines` and `hosts` in the config, copy the
+On the new machine do steps 1 to 4, add it to `machines` and `hosts` in the config, copy the
 config to every machine, run step 7 on every machine, then `scripts/deploy` from any one.
 
 ## Updating
