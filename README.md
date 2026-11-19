@@ -6,6 +6,33 @@ session under the project it works on, gives each project a task board shared by
 machines, and starts unattended agents on tasks, each in its own git worktree, with an
 optional code-review pass before a card reaches you.
 
+![Sessions grouped by company, client and side project, then by repo. An agent waits on a permission prompt.](docs/images/sessions.png)
+
+Every session sits under its project and repo, with what the agent says it's doing, its
+worktree, its context use and a badge when it needs you: `needs permission`, `has a
+question`, `plan needs approval`. The coordinator stays pinned at the top of its project.
+
+![A project's board with an active run, dependencies, code review results and agents on the cards.](docs/images/board.png)
+
+Each project has a board shared by all your machines. Run a chain of tasks and each one
+starts in its own worktree as the tasks it waits on finish. Cards show their agent's live
+state, code review results and what's waiting for your approval.
+
+![Today: the day's three picks, the agents that need you, the review queue and what changed since you left.](docs/images/today.png)
+
+Today reads across every project: the three tasks you picked for the day, every agent that
+needs you, everything waiting for your review, and what changed while you were away.
+
+<img src="docs/images/phone.png" alt="The phone page: an agent's plan waiting for approval, with its screen, prompt keys and a reply box." width="320" align="right">
+
+With the optional Pi, a page on your tailnet lists the agents that need you, with the last
+lines of their screen, keys for their prompt and a reply box, and your phone gets a push
+when one blocks or finishes while you're away.
+
+The screenshots use sample projects and agents.
+
+<br clear="right">
+
 What's in it:
 
 - The `projects` mod: a sidebar of projects > repos > sessions with live agent status,
