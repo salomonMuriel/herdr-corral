@@ -1,6 +1,8 @@
 # herdr-projects
 
-`README.md` describes how the system works and `INSTALL.md` how to set it up. When you
+Installing it? Follow `INSTALL.md` and check with `scripts/doctor`.
+
+`README.md` describes how the system works. When you
 change behaviour, update the section that describes it in the same commit.
 
 - Agents working on this repo run inside the Herdr app it customizes. A broken mod can take

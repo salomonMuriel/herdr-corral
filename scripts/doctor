@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Check this machine's herdr-projects install and say how to fix what's missing.
+
+  scripts/doctor           every check; exits 1 when something must be fixed
+  scripts/doctor --before-deploy   skip the checks that only pass after scripts/deploy
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import socket
+import stat
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Callable
+
+REPO = Path(__file__).resolve().parents[1]
+HOME = Path.home()
+CHECKOUT = HOME / "git/herdr-projects"
+CONFIG = Path(os.environ.get("HERDR_BOARD_CONFIG", HOME / ".config/herdr-board/config.json"))
+APP_HOME = Path(os.environ.get("HERDR_APP_HOME", HOME / ".config/herdr-app"))
+LOCAL_BIN = HOME / ".local/bin"
+REQUIRED_TOOLS = {
+    "git": "install git",
+    "gh": "https://cli.github.com, then gh auth login",
+    "uv": "curl -LsSf https://astral.sh/uv/install.sh | sh",
+    "rsync": "brew install rsync, or apt install rsync",
+    "claude": "https://claude.com/claude-code",
+}
+
+failures = 0
+warnings = 0
+
+
+class Problem(Exception):
+    def __init__(self, message: str, fix: str = "", warn: bool = False):
+        super().__init__(message)
+        self.fix = fix
+        self.warn = warn
+
+
+def check(title: str, run: Callable[[], str | None]) -> None:
+    global failures, warnings
+    try:
+        detail = run()
+        print(f"ok    {title}" + (f": {detail}" if detail else ""))
+    except Problem as problem:
+        if problem.warn:
+            warnings += 1
+            print(f"warn  {title}: {problem}")
+        else:
+            failures += 1
+            print(f"FAIL  {title}: {problem}")
+        if problem.fix:
+            print(f"      fix: {problem.fix}")
+
+
+def run(argv: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+
+
+def which(name: str) -> str | None:
+    return shutil.which(name) or (str(LOCAL_BIN / name) if (LOCAL_BIN / name).exists() else None)
+
+
+def load_config() -> dict[str, Any]:
+    return json.loads(CONFIG.read_text())
+
+
+def self_name(config: dict[str, Any]) -> str:
+    host = socket.gethostname()
+    names = config.get("machines") or {}
+    return names.get(host) or names.get(host.split(".")[0]) or host.split(".")[0]
+
+
+def board_sql(config: dict[str, Any], query: str) -> list[dict[str, Any]]:
+    board = config["board"]
+    request = urllib.request.Request(
+        f"https://{board['host']}/sql",
+        data=json.dumps({"query": query, "params": []}).encode(),
+        headers={"Content-Type": "application/json", "Neon-Connection-String": board["url"]},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.load(response)["rows"]
+    except urllib.error.HTTPError as error:
+        raise Problem(f"{error.code}: {error.read().decode(errors='replace')[:200]}") from error
+
+
+def check_herdr() -> str:
+    for name in ("herdr-app", "hc"):
+        if not which(name):
+            raise Problem(f"{name} not found", "curl -fsSL https://releases.herdr.dev/app/install.sh | sh, then open Herdr once")
+    if not APP_HOME.is_dir():
+        raise Problem(f"{APP_HOME} doesn't exist", "open the Herdr app once")
+    return run([which("hc") or "hc", "--version"]).stdout.strip()
+
+
+def check_tools() -> str:
+    missing = [f"{name} ({fix})" for name, fix in REQUIRED_TOOLS.items() if not which(name)]
+    if missing:
+        raise Problem("missing " + "; ".join(missing))
+    if sys.version_info < (3, 10):
+        raise Problem(f"python3 is {sys.version.split()[0]}", "install Python 3.10 or newer")
+    if run(["gh", "auth", "status"]).returncode != 0:
+        raise Problem("gh isn't signed in", "gh auth login (the person signs in)")
+    return None
+
+
+def check_path() -> None:
+    if str(LOCAL_BIN) not in os.environ.get("PATH", "").split(os.pathsep):
+        raise Problem("~/.local/bin isn't on PATH, so agents can't run hb",
+                      "add export PATH=\"$HOME/.local/bin:$PATH\" to the shell's rc file")
+
+
+def check_checkout() -> str:
+    if REPO != CHECKOUT.resolve():
+        raise Problem(f"this repo is at {REPO}, the mod runs scripts from {CHECKOUT}",
+                      f"git clone <your repo url> {CHECKOUT}")
+    branch = run(["git", "-C", str(REPO), "symbolic-ref", "--short", "HEAD"]).stdout.strip()
+    if branch != "main":
+        raise Problem(f"on {branch or 'a detached HEAD'}, deploys and catch-ups need main", "git checkout main")
+    origin = run(["git", "-C", str(REPO), "remote", "get-url", "origin"]).stdout.strip()
+    if not origin:
+        raise Problem("no origin remote", "git remote add origin <your repo url>")
+    return origin
+
+
+def check_config() -> str:
+    if not CONFIG.exists():
+        raise Problem(f"no {CONFIG}", f"mkdir -p {CONFIG.parent} && cp {REPO}/examples/config.example.json {CONFIG} && chmod 600 {CONFIG}, then fill it in (INSTALL.md step 5)")
+    if stat.S_IMODE(CONFIG.stat().st_mode) & 0o077:
+        raise Problem("readable by other users and it holds the board's password", f"chmod 600 {CONFIG}")
+    try:
+        config = load_config()
+    except ValueError as error:
+        raise Problem(f"not valid JSON: {error}") from error
+    board = config.get("board") or {}
+    if not board.get("host") or not board.get("url") or "PASSWORD" in board.get("url", "") or "example" in board.get("host", ""):
+        raise Problem("board.host and board.url aren't filled in", "INSTALL.md step 3")
+    if "/" in board["host"] or board["host"].startswith("http"):
+        raise Problem(f"board.host is {board['host']!r}; it should be a bare host like ep-xxx.region.aws.neon.tech")
+    name = self_name(config)
+    hosts = config.get("hosts") or {}
+    if name not in hosts:
+        raise Problem(f"this machine is {name!r} (hostname {socket.gethostname()!r}) and hosts has no entry for it",
+                      f'add "{socket.gethostname()}": "<name>" to machines and a hosts.<name> entry')
+    for machine, host in hosts.items():
+        if host.get("platform") not in ("linux", "macos"):
+            raise Problem(f"hosts.{machine}.platform must be linux or macos")
+        if machine != name and not host.get("ssh"):
+            raise Problem(f"hosts.{machine}.ssh is missing")
+    return f"this machine is {name}; machines: {', '.join(hosts)}"
+
+
+def check_herdr_machines() -> str | None:
+    config = load_config()
+    name = self_name(config)
+    others = [machine for machine in (config.get("hosts") or {}) if machine != name]
+    if not others:
+        return "single machine"
+    listed = run([which("hc") or "hc", "machine", "ls", "--json"])
+    if listed.returncode != 0:
+        raise Problem(f"hc machine ls failed: {listed.stderr.strip()[:200]}")
+    known = {m["name"]: m.get("state") for m in json.loads(listed.stdout)["machines"]}
+    missing = [m for m in others if m not in known]
+    if missing:
+        fixes = "; ".join(f"hc machine add {config['hosts'][m]['ssh']} --name {m} --install" for m in missing)
+        raise Problem(f"herdr-core doesn't know {', '.join(missing)} by those names", fixes)
+    down = [m for m in others if known[m] != "connected"]
+    if down:
+        raise Problem(f"not connected: {', '.join(down)}", "make sure they're on and reachable over ssh", warn=True)
+    return f"connected to {', '.join(others)}"
+
+
+def check_ssh() -> str | None:
+    config = load_config()
+    name = self_name(config)
+    others = {m: h["ssh"] for m, h in (config.get("hosts") or {}).items() if m != name}
+    unreachable = [m for m, target in others.items()
+                   if run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", target, "true"], timeout=15).returncode != 0]
+    if unreachable:
+        raise Problem(f"no password-less ssh to {', '.join(unreachable)}",
+                      "enable Tailscale SSH (tailscale up --ssh) or add this machine's key to their authorized_keys; scripts/deploy and hc need it",
+                      warn=True)
+    return None if not others else "ok"
+
+
+def check_board() -> str:
+    config = load_config()
+    try:
+        board_sql(config, "select 1 as ok")
+    except (OSError, KeyError, ValueError) as error:
+        raise Problem(f"can't query the board: {error}", "check board.host and board.url") from error
+    try:
+        applied = {row["name"] for row in board_sql(config, "select name from schema_migrations")}
+    except Problem:
+        applied = set()
+    pending = [f.name for f in sorted((REPO / "schema").glob("*.sql")) if f.name not in applied]
+    if pending:
+        raise Problem(f"{len(pending)} migrations not applied (from {pending[0]})", "scripts/migrate")
+    return f"reachable, {len(applied)} migrations applied"
+
+
+def check_deployed() -> str:
+    mod = APP_HOME / "mods/projects"
+    if not (mod / "main.js").exists():
+        raise Problem("the mod isn't in Herdr yet", "scripts/deploy (or scripts/deploy --local)")
+    for tool in ("hb", "hb_coordinator.py", "herdr-ask", "herdr-approve", "herdr-presence"):
+        if not (LOCAL_BIN / tool).exists():
+            raise Problem(f"~/.local/bin/{tool} missing", "scripts/deploy --local")
+    settings = HOME / ".claude/settings.json"
+    if "herdr-ask" not in (settings.read_text() if settings.exists() else ""):
+        raise Problem("Claude Code hooks aren't in ~/.claude/settings.json", "scripts/deploy --local")
+    checked = run([which("herdr-app") or "herdr-app", "check", str(mod)], timeout=60)
+    if checked.returncode != 0:
+        raise Problem(f"herdr-app check failed: {(checked.stdout + checked.stderr).strip()[-300:]}")
+    version = mod / "VERSION"
+    return json.loads(version.read_text()).get("sha", "")[:7] if version.exists() else "deployed"
+
+
+def check_layout() -> str:
+    status = run([which("herdr-app") or "herdr-app", "status"])
+    if status.returncode != 0:
+        raise Problem("the Herdr window isn't open", "open Herdr, then run this again", warn=True)
+    shown = json.loads(status.stdout)
+    if shown.get("layout") != "projects-dracula":
+        raise Problem(f"the window shows {shown.get('layout')!r}", "herdr-app do layout.switch --name projects-dracula")
+    errors = shown.get("errors") or []
+    if errors:
+        raise Problem(f"the window reports errors: {json.dumps(errors)[:300]}")
+    return "projects-dracula, no errors"
+
+
+def main() -> None:
+    before_deploy = "--before-deploy" in sys.argv
+    check("Herdr", check_herdr)
+    check("tools", check_tools)
+    check("~/.local/bin on PATH", check_path)
+    check("checkout", check_checkout)
+    check("config", check_config)
+    if failures:
+        print("\nFix the above first; the remaining checks need them.")
+        sys.exit(1)
+    check("machines in herdr-core", check_herdr_machines)
+    check("ssh to other machines", check_ssh)
+    check("board", check_board)
+    if not before_deploy:
+        check("deployed", check_deployed)
+        check("window", check_layout)
+    print(f"\n{failures} to fix, {warnings} warnings." if failures or warnings else "\nAll good.")
+    sys.exit(1 if failures else 0)
+
+
+if __name__ == "__main__":
+    main()

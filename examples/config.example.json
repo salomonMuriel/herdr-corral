@@ -8,20 +8,19 @@
     "laptop": "mac"
   },
   "hosts": {
-    "desk": { "ssh": "you@desk", "platform": "linux", "slots": 8 },
-    "laptop": { "ssh": "you@laptop", "platform": "macos", "slots": 4 }
+    "desk": {
+      "ssh": "you@desk",
+      "platform": "linux",
+      "slots": 8
+    },
+    "laptop": {
+      "ssh": "you@laptop",
+      "platform": "macos",
+      "slots": 4
+    }
   },
   "board": {
     "host": "ep-example-123456.us-east-2.aws.neon.tech",
     "url": "postgresql://herdr_owner:PASSWORD@ep-example-123456.us-east-2.aws.neon.tech/herdr?sslmode=require"
-  },
-  "pi": {
-    "ssh": "you@pi",
-    "host": "pi.your-tailnet.ts.net",
-    "dir": "herdr-pi"
-  },
-  "standby": {
-    "host": "desk.your-tailnet.ts.net",
-    "dir": "~/herdr-standby"
   }
 }

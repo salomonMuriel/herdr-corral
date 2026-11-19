@@ -20,7 +20,9 @@ What's in it:
   to answer agents and approve permission prompts, a nightly cleanup, backups and a
   daily digest. It can also host the board in its own Postgres.
 
-**Install: see [INSTALL.md](INSTALL.md).** The rest of this file describes how it works.
+**Install: see [INSTALL.md](INSTALL.md).** It needs one or more machines with Herdr and a free
+Neon database; the Pi is optional ([docs/pi.md](docs/pi.md)). The rest of this file describes
+how it works.
 The examples below use two machines named `desk` (Linux) and `laptop` (macOS); yours come
 from `~/.config/herdr-board/config.json`.
 
@@ -53,6 +55,8 @@ from `~/.config/herdr-board/config.json`.
 - `scripts/nightly-cleanup`: run by the Pi over ssh from `~/git/herdr-projects`, not copied.
 - `schema/`: the board's migrations, applied in order by `scripts/migrate`; a standby follows on its own. Each is idempotent. Apply a migration before deploying the code that reads it, and one that drops columns after the code that stopped reading them is live.
 - `scripts/herdr_config.py`: reads the machine config for the scripts (`self`, `machines`, `ssh <machine>`, `get <key>`).
+- `scripts/doctor`: checks this machine's install and prints the fix for each problem.
+- `scripts/migrate`: applies new `schema/` files and records them in `schema_migrations`.
 
 ## Review
 
@@ -197,7 +201,7 @@ The new tab opens in the repo's space on the target, the card (or the task's row
 
 Everything kept for another reason is marked `review`: dirty or unmerged worktrees, Neon branches no task or PR explains. Worktrees in use and protected Neon branches are just `keep`.
 
-Each night at 03:30 (Pi time) the Pi runs `scripts/nightly-cleanup` on the first machine in its config that answers. It runs `scripts/cleanup --auto`, which removes every safe item without asking and writes a row to `cleanup_runs`: what it removed, what is left to review and the branch count of each Neon project. A machine or Neon it couldn't reach keeps the items the last run found there. `--auto` stops before removing anything when it can't read the board's tasks.
+Each night (from cron on one machine, INSTALL.md step 10, or at 03:30 Pi time from the Pi) `scripts/nightly-cleanup` runs; the Pi runs it on the first machine in its config that answers. It runs `scripts/cleanup --auto`, which removes every safe item without asking and writes a row to `cleanup_runs`: what it removed, what is left to review and the branch count of each Neon project. A machine or Neon it couldn't reach keeps the items the last run found there. `--auto` stops before removing anything when it can't read the board's tasks.
 
 The sidebar footer shows the last run, e.g. `Cleanup: 3 to review · 4.2 GB · Neon 9/10 on my-app`: the items to review, the disk their worktrees take, and the Neon project with the most branches (orange at 9, red past the 10 included in the plan). It turns orange when no run has landed for 36 hours. A click lists the items with why each was kept.
 

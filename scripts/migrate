@@ -1,17 +1,32 @@
 #!/usr/bin/env bash
-# Apply schema/*.sql in order to the board. Every migration is idempotent, so running it
-# again is safe. Needs psql 16+ and board.url in ~/.config/herdr-board/config.json.
-#   scripts/migrate            all migrations
-#   scripts/migrate 0019       from that number on
+# Apply schema/*.sql in order to the board and record each one in schema_migrations.
+# Recorded ones are skipped; each migration is idempotent anyway.
+# Uses psql when it's installed, otherwise psql from the postgres:18 Docker image.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 url="${HERDR_BOARD_URL:-$(python3 "$repo/scripts/herdr_config.py" get board.url)}"
-from="${1:-0000}"
+
+if command -v psql >/dev/null 2>&1; then
+  psql=(psql)
+elif command -v docker >/dev/null 2>&1; then
+  psql=(docker run --rm -i --network host postgres:18 psql)
+else
+  echo "Needs psql (brew install libpq, or apt install postgresql-client) or Docker." >&2
+  exit 1
+fi
+
+run_sql() { "${psql[@]}" "$url" -v ON_ERROR_STOP=1 -q -X "$@"; }
+
+run_sql -c "set client_min_messages to warning" -c "create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())"
+
+applied="$(run_sql -tA -c "select name from schema_migrations")"
 
 for file in "$repo"/schema/*.sql; do
   name="$(basename "$file")"
-  [[ "$name" < "$from" ]] && continue
+  grep -qxF "$name" <<<"$applied" && continue
   echo "== $name"
-  psql "$url" -v ON_ERROR_STOP=1 -q -f "$file"
+  run_sql < "$file"
+  run_sql -c "insert into schema_migrations (name) values ('$name') on conflict do nothing"
 done
+echo "Board schema is up to date."

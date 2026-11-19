@@ -1,0 +1,11 @@
+{
+  "pi": {
+    "ssh": "you@pi",
+    "host": "pi.your-tailnet.ts.net",
+    "dir": "herdr-pi"
+  },
+  "standby": {
+    "host": "desk.your-tailnet.ts.net",
+    "dir": "~/herdr-standby"
+  }
+}

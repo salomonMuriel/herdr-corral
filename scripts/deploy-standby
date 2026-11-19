@@ -10,6 +10,7 @@ pi="${HERDR_PI_SSH:-$(python3 "$config" get pi.ssh)}"
 primary="${HERDR_DB_PRIMARY:-$(python3 "$config" get pi.host)}"
 pi_dir="$(python3 "$config" get pi.dir herdr-pi)"
 dest="${HERDR_STANDBY_DIR:-$(python3 "$config" get standby.dir "$HOME/herdr-standby")}"
+dest="${dest/#\~/$HOME}"
 data="$dest/standby/data"
 db_port=5440
 sql_port=8097
