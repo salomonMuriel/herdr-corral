@@ -1,7 +1,7 @@
 """Points a machine at a board: python3 board_config.py <config path> <host> [url].
 
 Writes the `board` block of ~/.config/herdr-board/config.json; without a url it keeps the
-one already there.
+one already there, and a url of - is read from stdin so it stays out of the process list.
 """
 from __future__ import annotations
 
@@ -22,4 +22,5 @@ def point(path: Path, host: str, url: str | None) -> None:
 if __name__ == "__main__":
     if len(sys.argv) not in (3, 4):
         sys.exit("usage: board_config.py <config path> <host> [url]")
-    point(Path(sys.argv[1]).expanduser(), sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else None)
+    url = sys.argv[3] if len(sys.argv) == 4 else None
+    point(Path(sys.argv[1]).expanduser(), sys.argv[2], sys.stdin.read().strip() if url == "-" else url)

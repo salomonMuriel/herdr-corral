@@ -48,6 +48,12 @@ def platform(machine: str) -> str:
     return hosts().get(machine, {}).get("platform", "linux")
 
 
+def sql_endpoint(host: str) -> str:
+    """board.host is a bare host (https) or a full base URL like http://127.0.0.1:8097."""
+    base = host.rstrip("/") if "://" in host else f"https://{host}"
+    return f"{base}/sql"
+
+
 def get(dotted: str, default: Any = None) -> Any:
     value: Any = load()
     for part in dotted.split("."):

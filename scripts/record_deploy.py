@@ -5,6 +5,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
+from herdr_config import sql_endpoint
+
 CONFIG_PATH = Path.home() / ".config/herdr-board/config.json"
 
 
@@ -16,7 +18,7 @@ def record(sha: str, machine: str) -> None:
         "params": [sha, machine],
     }).encode()
     request = urllib.request.Request(
-        f"https://{board['host']}/sql",
+        sql_endpoint(board['host']),
         data=body,
         headers={"Content-Type": "application/json", "Neon-Connection-String": board["url"]},
         method="POST",

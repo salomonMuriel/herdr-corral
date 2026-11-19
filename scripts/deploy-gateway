@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Run the board's gateway on this machine, in Docker, in front of the Postgres at board.url
+# (Supabase, RDS, a server of your own...). Neon needs none. With Tailscale here it's
+# published on the tailnet over HTTPS; without it, only this machine reaches it.
+# Then this machine's config points board.host at it; copy the config to the others.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+config="$repo/scripts/herdr_config.py"
+board_config="${HERDR_BOARD_CONFIG:-$HOME/.config/herdr-board/config.json}"
+dest="${HERDR_GATEWAY_DIR:-$HOME/herdr-gateway}"
+port="${HERDR_GATEWAY_PORT:-8097}"
+export HERDR_GATEWAY_PORT="$port"
+
+command -v docker >/dev/null 2>&1 || { echo "Needs Docker on this machine." >&2; exit 1; }
+url="$(python3 "$config" get board.url)"
+
+build="$(mktemp -d)"
+trap 'rm -rf "$build"' EXIT
+git -C "$repo" archive HEAD pi gateway | tar -x -C "$build"
+mkdir -p "$dest"
+rsync -a --delete "$build/pi/" "$dest/pi/"
+rsync -a --delete --exclude .env "$build/gateway/" "$dest/gateway/"
+# Single quotes keep compose from expanding a $ in the password.
+(umask 077 && printf "HERDR_DATABASE_URL='%s'\n" "$url" > "$dest/gateway/.env")
+
+docker compose -f "$dest/gateway/compose.yml" up -d --build
+
+for _ in $(seq 30); do
+  if health="$(curl -fsS --max-time 10 "http://127.0.0.1:$port/health" 2>/dev/null)"; then
+    break
+  fi
+  health=""
+  sleep 2
+done
+[[ -n "$health" ]] || { echo "The gateway didn't answer on :$port; see: docker logs herdr-gateway" >&2; exit 1; }
+echo "gateway is up: $health"
+
+if command -v tailscale >/dev/null 2>&1 && tailscale serve --bg --https=$port "http://127.0.0.1:$port" >/dev/null; then
+  name="$(tailscale status --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
+  host="$name:$port"
+else
+  host="http://127.0.0.1:$port"
+  echo "No Tailscale here, so only this machine reaches the gateway." >&2
+fi
+
+python3 "$repo/scripts/board_config.py" "$board_config" "$host"
+echo "board.host is now $host in $board_config."
+[[ "$host" == http://127.0.0.1* ]] || echo "Copy that file to your other machines."

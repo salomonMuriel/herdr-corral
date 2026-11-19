@@ -18,7 +18,8 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
-COPY config.toml VERSION* ./
+# config.toml comes from scripts/deploy-pi; the gateway alone needs none.
+COPY config*.toml VERSION* ./
 RUN uv sync --frozen --no-dev
 
 USER herdr

@@ -7,6 +7,9 @@ const CONFIG_PATH = () => `${home()}/.config/herdr-board/config.json`;
 
 let configPromise = null;
 
+// board.host is a bare host (https) or a full base URL like http://127.0.0.1:8097.
+const sqlEndpoint = (host) => `${host.includes("://") ? host.replace(/\/+$/, "") : `https://${host}`}/sql`;
+
 export function loadConfig() {
   configPromise ??= (async () => {
     const text = await readTextFile(CONFIG_PATH());
@@ -25,7 +28,7 @@ async function post(body, headers = {}) {
   const { board } = config;
   let response;
   try {
-    response = await fetch(`https://${board.host}/sql`, {
+    response = await fetch(sqlEndpoint(board.host), {
       method: "POST",
       headers: { "Content-Type": "application/json", "Neon-Connection-String": board.url, ...headers },
       body: JSON.stringify(body),

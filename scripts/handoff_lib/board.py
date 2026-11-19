@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from handoff_lib.machines import HandoffError, board_config, self_name
 
+from herdr_config import sql_endpoint
+
 
 @dataclass
 class Link:
@@ -22,7 +24,7 @@ def post(queries: list[dict]) -> list[list[dict]]:
     config = board_config()
     board = config["board"]
     request = urllib.request.Request(
-        f"https://{board['host']}/sql",
+        sql_endpoint(board['host']),
         data=json.dumps({"queries": queries}).encode(),
         headers={"Content-Type": "application/json", "Neon-Connection-String": board["url"],
                  "Neon-Batch-Isolation-Level": "ReadCommitted"},
@@ -39,7 +41,7 @@ def read(query: str, params: list) -> list[dict]:
     return post([{"query": query, "params": params}])[0]
 
 
-# task_events (schema/0013) records the person on this machine as the writer.
+# task_events (schema/0001_board.sql) records the person on this machine as the writer.
 def write(query: str, params: list) -> None:
     actor = {"query": "select set_config('herdr.actor', 'person', true), set_config('herdr.machine', $1, true)",
              "params": [self_name()]}

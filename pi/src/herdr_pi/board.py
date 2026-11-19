@@ -10,10 +10,16 @@ from typing import Any
 
 Row = dict[str, Any]
 
-# Tells task_events (schema/0013) who wrote it and from where.
+# Tells task_events (schema/0001_board.sql) who wrote it and from where.
 ACTOR_QUERY = "select set_config('herdr.actor', $1, true), set_config('herdr.machine', $2, true)"
 WEB_ACTOR = ("person", "web")
 Actor = tuple[str, str]
+
+
+def sql_endpoint(host: str) -> str:
+    """board.host is a bare host (https) or a full base URL like http://127.0.0.1:8097."""
+    base = host.rstrip("/") if "://" in host else f"https://{host}"
+    return f"{base}/sql"
 
 
 class BoardError(Exception):
@@ -60,7 +66,7 @@ class Board:
     def post(self, body: dict[str, Any]) -> Any:
         host, url = self.credentials()
         request = urllib.request.Request(
-            f"https://{host}/sql",
+            sql_endpoint(host),
             data=json.dumps(body).encode(),
             headers={"Content-Type": "application/json", "Neon-Connection-String": url},
             method="POST",

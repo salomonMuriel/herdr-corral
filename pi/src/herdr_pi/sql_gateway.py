@@ -83,7 +83,9 @@ async def run(connection: psycopg.AsyncConnection[Any], statement: Statement) ->
 class Gateway:
     def __init__(self, conninfo: str):
         self.password = password_of(conninfo)
-        self.pool = AsyncConnectionPool(conninfo, min_size=1, max_size=4, configure=configure, open=False)
+        # No server-side prepared statements, so transaction poolers (PgBouncer, Supavisor) work.
+        self.pool = AsyncConnectionPool(conninfo, min_size=1, max_size=4, configure=configure, open=False,
+                                        kwargs={"prepare_threshold": None})
 
     def authorize(self, header: str | None) -> None:
         given = password_of(header or "")
@@ -147,6 +149,9 @@ def create_gateway_app(gateway: Gateway) -> FastAPI:
 
 
 def conninfo_from_env() -> str:
+    """HERDR_DATABASE_URL for any Postgres; otherwise the Pi's own herdr-db."""
+    if os.environ.get("HERDR_DATABASE_URL"):
+        return os.environ["HERDR_DATABASE_URL"]
     return make_conninfo(
         host=os.environ.get("HERDR_DB_HOST", "127.0.0.1"),
         port=os.environ.get("HERDR_DB_PORT", "5440"),
@@ -159,7 +164,8 @@ def conninfo_from_env() -> str:
 async def serve() -> None:
     port = int(os.environ.get("HERDR_SQL_PORT", "8097"))
     app = create_gateway_app(Gateway(conninfo_from_env()))
-    await uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port)).serve()
+    host = os.environ.get("HERDR_SQL_BIND", "127.0.0.1")
+    await uvicorn.Server(uvicorn.Config(app, host=host, port=port)).serve()
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+from herdr_config import sql_endpoint
+
 REPO = Path(__file__).resolve().parents[1]
 HOME = Path.home()
 CHECKOUT = HOME / "git/herdr-projects"
@@ -80,7 +82,7 @@ def self_name(config: dict[str, Any]) -> str:
 def board_sql(config: dict[str, Any], query: str) -> list[dict[str, Any]]:
     board = config["board"]
     request = urllib.request.Request(
-        f"https://{board['host']}/sql",
+        sql_endpoint(board['host']),
         data=json.dumps({"query": query, "params": []}).encode(),
         headers={"Content-Type": "application/json", "Neon-Connection-String": board["url"]},
         method="POST",
@@ -142,9 +144,12 @@ def check_config() -> str:
         raise Problem(f"not valid JSON: {error}") from error
     board = config.get("board") or {}
     if not board.get("host") or not board.get("url") or "PASSWORD" in board.get("url", "") or "example" in board.get("host", ""):
-        raise Problem("board.host and board.url aren't filled in", "INSTALL.md step 3")
-    if "/" in board["host"] or board["host"].startswith("http"):
-        raise Problem(f"board.host is {board['host']!r}; it should be a bare host like ep-xxx.region.aws.neon.tech")
+        raise Problem("board.host and board.url aren't filled in", "INSTALL.md step 6 (docs/database.md)")
+    host = board["host"]
+    if ("://" in host and not host.startswith(("http://", "https://"))) or ("://" not in host and "/" in host):
+        raise Problem(f"board.host is {host!r}; use a bare host (ep-xxx.aws.neon.tech, pi.tailnet.ts.net:8097) or http(s)://host:port")
+    if not board["url"].startswith(("postgres://", "postgresql://")):
+        raise Problem("board.url must be a postgresql:// connection string")
     name = self_name(config)
     hosts = config.get("hosts") or {}
     if name not in hosts:

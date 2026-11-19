@@ -20,7 +20,7 @@
     }
   },
   "board": {
-    "host": "ep-example-123456.us-east-2.aws.neon.tech",
-    "url": "postgresql://herdr_owner:PASSWORD@ep-example-123456.us-east-2.aws.neon.tech/herdr?sslmode=require"
+    "host": "",
+    "url": ""
   }
 }

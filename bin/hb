@@ -42,6 +42,12 @@ MAX_REVIEW_ROUNDS = 3
 STATUS_LABEL = {"todo": "To do", "doing": "In progress", "review": "Review", "done": "Done"}
 
 
+def sql_endpoint(host: str) -> str:
+    """board.host is a bare host (https) or a full base URL like http://127.0.0.1:8097."""
+    base = host.rstrip("/") if "://" in host else f"https://{host}"
+    return f"{base}/sql"
+
+
 def fail(message: str) -> None:
     print(f"hb: {message}", file=sys.stderr)
     sys.exit(1)
@@ -67,7 +73,7 @@ def post(body: dict[str, Any]) -> dict[str, Any]:
     config = load_config()
     board = config["board"]
     request = urllib.request.Request(
-        f"https://{board['host']}/sql",
+        sql_endpoint(board['host']),
         data=json.dumps(body).encode(),
         headers={
             "Content-Type": "application/json",
@@ -101,7 +107,7 @@ def machine_name() -> str:
     return names.get(host) or names.get(host.split(".")[0]) or host.split(".")[0]
 
 
-# The same transaction tells task_events (schema/0013) who on this machine wrote it.
+# The same transaction tells task_events (schema/0001_board.sql) who on this machine wrote it.
 def write_all(queries: list[tuple[str, list[Any]]], actor: str = "agent") -> list[dict[str, Any]]:
     tag = {
         "query": "select set_config('herdr.actor', $1, true), set_config('herdr.machine', $2, true)",

@@ -1,0 +1,22 @@
+# The board's gateway in front of any Postgres, set up by scripts/deploy-gateway.
+# .env beside this file holds HERDR_DATABASE_URL. For a Postgres on this same machine, use
+# host.docker.internal as its host.
+services:
+  herdr-gateway:
+    build: ../pi
+    image: herdr-pi:local
+    container_name: herdr-gateway
+    restart: unless-stopped
+    mem_limit: 128m
+    env_file: ./.env
+    environment:
+      HERDR_SQL_BIND: 0.0.0.0
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:${HERDR_GATEWAY_PORT:-8097}:8097"
+    command: ["python", "-m", "herdr_pi.sql_gateway"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8097/health', timeout=4)"]
+      interval: 60s
+      timeout: 5s

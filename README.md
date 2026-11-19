@@ -18,11 +18,40 @@ What's in it:
 - **Handoff**: move a running Claude Code session, with its conversation, to another machine.
 - **`herdr-pi`** (optional): an always-on service for phone alerts, a tailnet web page
   to answer agents and approve permission prompts, a nightly cleanup, backups and a
-  daily digest. It can also host the board in its own Postgres.
+  daily digest, next to the board's Postgres.
 
-**Install: see [INSTALL.md](INSTALL.md).** It needs one or more machines with Herdr and a free
-Neon database; the Pi is optional ([docs/pi.md](docs/pi.md)). The rest of this file describes
-how it works.
+## Stack
+
+Required:
+
+- **[Herdr](https://herdr.dev)** on every machine: the desktop app (`herdr-app`), whose mods
+  this repo adds, and herdr-core (`hc`), which runs the terminals and agents and links the
+  machines.
+- **Postgres** for the shared board, reached over HTTP: [Neon](https://neon.tech) natively,
+  any other Postgres through `herdr-sql`, the gateway in `pi/`
+  ([docs/database.md](docs/database.md)).
+- **[Claude Code](https://claude.com/claude-code)** for task agents, the run guard and
+  code review (hooks in `~/.claude/settings.json`). Codex works for sessions started by hand.
+- **git and GitHub** with the [`gh`](https://cli.github.com) CLI: worktrees per task, PR and
+  CI badges, issues on the board, repo creation.
+- **Python 3.10+ and [uv](https://docs.astral.sh/uv/)** for `hb`, the hooks and the scripts.
+
+Recommended:
+
+- **[Tailscale](https://tailscale.com)** to link the machines: SSH between them for
+  herdr-core and deploys, MagicDNS names, and HTTPS for the board and the web page
+  without exposing anything to the internet.
+- **An always-on box with Docker** (a Raspberry Pi is plenty) for the board's Postgres and,
+  optionally, the `herdr-pi` service: phone alerts through self-hosted
+  [ntfy](https://ntfy.sh), the web page, backups and the digest.
+
+Optional: [`neonctl`](https://neon.tech/docs/reference/neon-cli), so cleanup also removes
+Neon database branches your projects' agents create.
+
+The mod is JavaScript for Herdr's runtime; the service and the scripts are Python (FastAPI,
+psycopg, Pydantic); deploys are bash and rsync over SSH.
+
+**Install: see [INSTALL.md](INSTALL.md).** The rest of this file describes how it works.
 The examples below use two machines named `desk` (Linux) and `laptop` (macOS); yours come
 from `~/.config/herdr-board/config.json`.
 
@@ -31,8 +60,8 @@ from `~/.config/herdr-board/config.json`.
 - **Herdr window** (one per machine, layout `projects-dracula`): the `projects` mod draws the sidebar (a rail of project marks, split by short rules into companies, clients and side projects, beside a project > repo > session tree; a project's mark and tree row show its session count, and the row's `N open` counts its tasks that aren't Done), the board, Today and the top bar. Each window's leader pulls the board, starts run tasks for its own machine only, and cleans up after Done tasks on its own machine.
 - **herdr-core (`hc`)** on each machine runs every terminal and agent; every window sees every machine's sessions.
 - **Repos** live in `~/git/<repo>` on each machine unless a repo records its own folder. A repo grouped one folder down is named `<group>/<repo>` (`acme/frontend`), and the project dialog offers those next to the top-level folders. Typing a name that isn't a repo yet offers `Create <name>`: it runs `git init` in `~/git/<name>` on this machine and makes a private GitHub repo as its `origin`, owned by whoever owns the other repos in that group folder, or your account. A name without a group joins the group the project's repos share. Starting a session in a repo the machine doesn't have clones it there first, from the `origin` of a machine that has it (log: `~/.cache/herdr-projects/clone-<repo>.log`). An existing checkout is never pulled.
-- **The board** lives in Postgres (projects, repos, tasks, dependencies, runs, history): a Neon database, or the Pi's own Postgres with an optional standby (see Board database). Every machine reads and writes it over HTTPS with Neon's `/sql` protocol. Dialogs and popups don't write to it themselves: Herdr cancels a closed overlay's requests after 250 ms, too soon for a round trip, so they queue their writes and starts in shared state and the sidebar's leader sends them. A dropped project logo is read in the dialog and queued the same way. Nothing reads the board on a timer. A window pulls when it starts, when it comes forward and after every write made on its machine, by the window itself or by `hb` and `scripts/task-cleanup` (which run `herdr-app do projects.wrote`). After such a write it also tells the other machines' windows to pull (`herdr-app do projects.pull` over ssh). A pull that was already under way fetches again so it can't bring back older rows. An archived project's repos, tasks, runs and coordinator stay out of pulls, so its sessions show as not in a project.
-- **The Pi** (`herdr-pi`, optional) is the always-on part on any small Linux box with Docker on your tailnet: phone alerts (ntfy), the tailnet web page and approvals, the nightly cleanup, the board backup, the daily digest and, if you want, the board's database.
+- **The board** lives in Postgres (projects, repos, tasks, dependencies, runs, history): on the Pi with an optional standby, on Neon, or any other Postgres behind the `herdr-sql` gateway (see Board database). Every machine reads and writes it over HTTP with Neon's `/sql` protocol. Dialogs and popups don't write to it themselves: Herdr cancels a closed overlay's requests after 250 ms, too soon for a round trip, so they queue their writes and starts in shared state and the sidebar's leader sends them. A dropped project logo is read in the dialog and queued the same way. Nothing reads the board on a timer. A window pulls when it starts, when it comes forward and after every write made on its machine, by the window itself or by `hb` and `scripts/task-cleanup` (which run `herdr-app do projects.wrote`). After such a write it also tells the other machines' windows to pull (`herdr-app do projects.pull` over ssh). A pull that was already under way fetches again so it can't bring back older rows. An archived project's repos, tasks, runs and coordinator stay out of pulls, so its sessions show as not in a project.
+- **The Pi** is the always-on part, on any small Linux box with Docker on your tailnet: the board's database in the recommended setup and, optionally, `herdr-pi` for phone alerts (ntfy), the tailnet web page and approvals, the nightly cleanup, the board backup and the daily digest.
 - **Your clone of this repo** at `~/git/herdr-projects` on every machine is the source. Nothing is edited in `~/.config/herdr-app` directly: work is merged to `main` and `scripts/deploy` copies it to every machine in the config (`scripts/deploy-pi` for the Pi).
 
 ## Working day to day
@@ -53,10 +82,12 @@ from `~/.config/herdr-board/config.json`.
 - `bin/herdr-presence`: copied to `~/.local/bin/herdr-presence`. Prints whether this machine's Herdr window is in front and how long since the last keyboard or mouse input, for the Pi's phone alerts.
 - `scripts/task-cleanup`, `scripts/handoff`: run by the window from `~/git/herdr-projects`, not copied.
 - `scripts/nightly-cleanup`: run by the Pi over ssh from `~/git/herdr-projects`, not copied.
-- `schema/`: the board's migrations, applied in order by `scripts/migrate`; a standby follows on its own. Each is idempotent. Apply a migration before deploying the code that reads it, and one that drops columns after the code that stopped reading them is live.
+- `schema/`: the board's schema. `0001_board.sql` creates the whole board; later changes go in new numbered files, applied in order by `scripts/migrate`, which records them in `schema_migrations`. A standby follows on its own. Apply a migration before deploying the code that reads it, and one that drops columns after the code that stopped reading them is live.
 - `scripts/herdr_config.py`: reads the machine config for the scripts (`self`, `machines`, `ssh <machine>`, `get <key>`).
 - `scripts/doctor`: checks this machine's install and prints the fix for each problem.
-- `scripts/migrate`: applies new `schema/` files and records them in `schema_migrations`.
+- `scripts/deploy-gateway`, `gateway/`: the `herdr-sql` gateway in Docker in front of a Postgres other than Neon or the Pi's (docs/database.md).
+- `docs/`: where the board can live (`database.md`) and the Pi service (`pi.md`).
+- `scripts/migrate`: applies the `schema/` files a board doesn't have yet.
 
 ## Review
 
@@ -64,13 +95,13 @@ Each project picks who checks a task before it counts as done: None, Code review
 
 ## Code review
 
-With code review on, `hb done` doesn't move the card. It queues a review (`code_review_state`, schema/0013), and the window of the task's machine runs `mods/projects/agent/code_review.py` detached: `claude -p` in the task's worktree runs `/code-review` on the branch against main, with the task's title and notes as the requirements, under the run guard and without edit tools. It is told to report only real issues (bugs, broken behaviour, data loss, security holes, production failures, clear misses of the task's requirements) and to pass when there are none. The verdict lands in `~/.cache/herdr-projects/code-review/<task>-<round>.json`, the log in `~/.cache/herdr-projects/code-review.log`.
+With code review on, `hb done` doesn't move the card. It queues a review (`code_review_state`), and the window of the task's machine runs `mods/projects/agent/code_review.py` detached: `claude -p` in the task's worktree runs `/code-review` on the branch against main, with the task's title and notes as the requirements, under the run guard and without edit tools. It is told to report only real issues (bugs, broken behaviour, data loss, security holes, production failures, clear misses of the task's requirements) and to pass when there are none. The verdict lands in `~/.cache/herdr-projects/code-review/<task>-<round>.json`, the log in `~/.cache/herdr-projects/code-review.log`.
 
 Findings go to the task's agent with `hc send`; it fixes them, commits and runs `hb done` again, which starts the next round. After a pass, a task you review moves to Review; one you don't gets "merge and push, then hb done", and that `hb done` moves it to Done. The card reads `Code review passed`. Still open after 3 rounds, the card moves to Review with `Code review: N open after 3 rounds` and asks you, so nothing downstream starts. A review that can't run, or has no verdict after 45 minutes, asks you the same way.
 
 ## Tasks across repos
 
-A task has its own repo (Repo in the task dialog) and can span others (Also in), one row each in `task_repos` (schema/0014). Each repo gets its own agent session and worktree, on the same branch name. Start agent on the card starts the next repo without one; starting a task in a repo it doesn't list adds that repo once the task has a session. Linking a session from another repo does the same. The card lists every repo and a chip per agent; the repo filter shows a task under each of its repos.
+A task has its own repo (Repo in the task dialog) and can span others (Also in), one row each in `task_repos`. Each repo gets its own agent session and worktree, on the same branch name. Start agent on the card starts the next repo without one; starting a task in a repo it doesn't list adds that repo once the task has a session. Linking a session from another repo does the same. The card lists every repo and a chip per agent; the repo filter shows a task under each of its repos.
 
 Runs, dependencies and code review follow the task's own repo. Its agent's `hb done` moves the card. An agent in another repo reports its part: `hb ask` and `hb note` name the repo on the card, and `hb done` saves a note, or moves the card as usual when no agent works in the task's own repo. When the task is Done, each repo's session closes and its worktree is cleaned like the task's own, with the outcome on the card under the repo's name.
 
@@ -80,7 +111,7 @@ In Needs you, By task puts a task's agents under its title, each row named by it
 
 Nothing starts by itself until you click Run. Run this chain (on a card) runs that task and every open task downstream of it; Run selected runs the cards you picked with shift-click or by clicking a column's header. The Run popup picks the machine, the agent, the mode and the review: each task's own, None, Code review, Your review or Both (written onto the run's To do tasks; a waiver in a task's notes still turns off your review).
 
-A run is a row in `runs` (schema/0009). Its tasks start as each becomes Ready: every task it waits on is Done. How a task reaches Done follows its review mode, so a run pauses at Review when you review. The board shows each active run as "Run: 7 of 12 done" with Stop run, which stops new starts and leaves running agents alone. A run ends when its last task is Done.
+A run is a row in `runs`. Its tasks start as each becomes Ready: every task it waits on is Done. How a task reaches Done follows its review mode, so a run pauses at Review when you review. The board shows each active run as "Run: 7 of 12 done" with Stop run, which stops new starts and leaves running agents alone. A run ends when its last task is Done.
 
 Starts from (in the task dialog, once a task waits on something): Main, once merged (the default) waits until each finished dependency's branch is in the default branch (an ancestor of it, a merged GitHub PR, or deleted). The branch it waits on starts the new worktree from the one unmerged dependency branch in the same repo on the same machine. When nobody reviews a task that others wait on from main, its agent is told to merge before `hb done`.
 
@@ -99,11 +130,11 @@ Agents a run starts can't wait for answers. `mods/projects/unattended.js` starts
 
 It judges what a command runs (`agent/guard_shell.py` parses each simple command), never words in notes, commit messages or heredocs, so mentioning or editing deploy code is fine. Agents you start by hand don't get the guard.
 
-Claude Code starts in Auto or Plan mode (`--permission-mode`), picked in the Run popup (`runs.permission_mode`, schema/0019) and in the start popup; both remember the last pick. In a Plan run the guard leaves `ExitPlanMode` and file edits to Claude Code, so the agent plans read-only and the card shows `plan needs approval` until you approve the plan in its session. After that it runs unattended as usual. Runs from `hb start` start in the machine's default mode.
+Claude Code starts in Auto or Plan mode (`--permission-mode`), picked in the Run popup (`runs.permission_mode`) and in the start popup; both remember the last pick. In a Plan run the guard leaves `ExitPlanMode` and file edits to Claude Code, so the agent plans read-only and the card shows `plan needs approval` until you approve the plan in its session. After that it runs unattended as usual. Runs from `hb start` start in the machine's default mode.
 
 ## Coordinator
 
-A project can have one coordinator: a Claude Code session that splits the work into tasks, starts agents on them and passes on only what needs you. It never writes code. Start coordinator (the pin on the project's panel, or on its row in All projects) opens it on this machine in the main checkout of the project's first repo checked out here, records its tab in `coordinators` (schema/0018) and pins its row at the top of the project. Its first message explains the job; it reads the board and waits for you to say what to work on.
+A project can have one coordinator: a Claude Code session that splits the work into tasks, starts agents on them and passes on only what needs you. It never writes code. Start coordinator (the pin on the project's panel, or on its row in All projects) opens it on this machine in the main checkout of the project's first repo checked out here, records its tab in `coordinators` and pins its row at the top of the project. Its first message explains the job; it reads the board and waits for you to say what to work on.
 
 The run guard runs in `--coordinator` mode for it: on top of the unattended rules it refuses edits outside temp folders, git commands that change a repo, installs, SQL writes, and merging, closing or reviewing PRs. `AskUserQuestion` is refused in favour of `hb ask`. In its terminal `hb` has its own commands (`bin/hb_coordinator.py`):
 
@@ -120,13 +151,13 @@ While the coordinator is live, its workers stay out of Needs you, the Pi's page 
 
 ## History
 
-Every change to a task lands in `task_events` (schema/0013), written by a trigger on `tasks`, so nothing that writes the board can skip it: created, moved between columns, agent started (the task got a session), report (`hb done`, `ask`, `note`), edited (title, notes, importance, repo, review, code review, start branch) and deleted. Reordering inside a column and the cleanup line aren't logged. Each row says who and from where: `person` (the window, or `web` for the Pi's page), `agent` (`hb`), `run` (a run's starts), `review` (a code review's verdict) or `herdr` (the window on its own, like the folder trust flag). A writer says so with `set_config('herdr.actor', …, true)` and `set_config('herdr.machine', …, true)` in the same transaction; one that doesn't shows as Someone.
+Every change to a task lands in `task_events`, written by a trigger on `tasks`, so nothing that writes the board can skip it: created, moved between columns, agent started (the task got a session), report (`hb done`, `ask`, `note`), edited (title, notes, importance, repo, review, code review, start branch) and deleted. Reordering inside a column and the cleanup line aren't logged. Each row says who and from where: `person` (the window, or `web` for the Pi's page), `agent` (`hb`), `run` (a run's starts), `review` (a code review's verdict) or `herdr` (the window on its own, like the folder trust flag). A writer says so with `set_config('herdr.actor', …, true)` and `set_config('herdr.machine', …, true)` in the same transaction; one that doesn't shows as Someone.
 
 The task dialog lists the card's history under its buttons, and History on the board lists the project's last 100 changes. A move or an edit has Undo while the task still holds what it set. A deleted task's row keeps the whole task and its dependencies, and Restore brings it back with them. `eventsSince(at)` in `mods/projects/history.js` reads the changes since a moment, oldest first.
 
 ## GitHub issues
 
-Issues on the board lists each repo's open issues (`gh issue list`, asked on the first machine that has the repo checked out). A click on an issue imports it into To do as a task with the issue's title and body, linked by `issue_url` (schema/0015, one task per issue per project); Import N takes every issue of a repo not yet on the board. Clicking an issue that is already a task opens it, or goes to its agent when one is working on it. The card shows `#123` and the task dialog links the issue.
+Issues on the board lists each repo's open issues (`gh issue list`, asked on the first machine that has the repo checked out). A click on an issue imports it into To do as a task with the issue's title and body, linked by `issue_url` (one task per issue per project); Import N takes every issue of a repo not yet on the board. Clicking an issue that is already a task opens it, or goes to its agent when one is working on it. The card shows `#123` and the task dialog links the issue.
 
 Starting an agent on one names the worktree `issue-<number>-<slug>` (branch `worktree-issue-<number>-<slug>`), and its first message names the issue. When the task reaches Done, by `hb done` or by hand, the window of its machine (either window when it never ran) comments on the issue with the agent's summary and the branch: `gh issue comment`, claimed in `issue_commented_at` so it posts once. A failed comment is retried every 10 minutes. The issue stays open; closing it is left to the PR or to you.
 
@@ -170,7 +201,7 @@ An agent needs you when it is blocked on a prompt, or at its prompt after a turn
 
 Today sits beside Sessions and Board in the top bar (`cmd-y` on macOS, `ctrl-alt-y` on Linux) and takes the board's place. It reads across every project:
 
-- Today's 3: up to three tasks you pick for the day, from Pick or a row's Pick for today. Picks are rows in `today_picks` (schema/0016) keyed by the machine's local date, so both machines show the same three.
+- Today's 3: up to three tasks you pick for the day, from Pick or a row's Pick for today. Picks are rows in `today_picks` keyed by the machine's local date, so both machines show the same three.
 - Needs you: the same agents as the sidebar's list. A click opens the agent.
 - Review: every task waiting for your review, oldest first.
 - Urgent and high: open tasks of that importance that aren't in Review.
@@ -201,7 +232,7 @@ The new tab opens in the repo's space on the target, the card (or the task's row
 
 Everything kept for another reason is marked `review`: dirty or unmerged worktrees, Neon branches no task or PR explains. Worktrees in use and protected Neon branches are just `keep`.
 
-Each night (from cron on one machine, INSTALL.md step 10, or at 03:30 Pi time from the Pi) `scripts/nightly-cleanup` runs; the Pi runs it on the first machine in its config that answers. It runs `scripts/cleanup --auto`, which removes every safe item without asking and writes a row to `cleanup_runs`: what it removed, what is left to review and the branch count of each Neon project. A machine or Neon it couldn't reach keeps the items the last run found there. `--auto` stops before removing anything when it can't read the board's tasks.
+Each night (from cron on one machine, INSTALL.md step 11, or at 03:30 Pi time from the Pi) `scripts/nightly-cleanup` runs; the Pi runs it on the first machine in its config that answers. It runs `scripts/cleanup --auto`, which removes every safe item without asking and writes a row to `cleanup_runs`: what it removed, what is left to review and the branch count of each Neon project. A machine or Neon it couldn't reach keeps the items the last run found there. `--auto` stops before removing anything when it can't read the board's tasks.
 
 The sidebar footer shows the last run, e.g. `Cleanup: 3 to review · 4.2 GB · Neon 9/10 on my-app`: the items to review, the disk their worktrees take, and the Neon project with the most branches (orange at 9, red past the 10 included in the plan). It turns orange when no run has landed for 36 hours. A click lists the items with why each was kept.
 
@@ -224,10 +255,15 @@ The API listens on `127.0.0.1:8095` on the Pi:
 
 ### Board database
 
-The board can live in two places. Every client speaks Neon's HTTP `/sql` protocol (one query, or `queries` run as one transaction) to `https://<board.host>/sql`, so either works:
+Every client speaks Neon's HTTP `/sql` protocol (one query, or `queries` run as one transaction) to `<board.host>/sql` (`https://` unless `board.host` names its scheme), because the mod can't open a database connection. `herdr-sql` (`pi/src/herdr_pi/sql_gateway.py`) answers that protocol in front of any Postgres: it checks the password in the request's `Neon-Connection-String` header against its own database's and uses no server-side prepared statements, so transaction poolers work. [docs/database.md](docs/database.md) sets up each option:
 
-- **Neon**: create a database and put its host and connection string in the config. Nothing else to run.
-- **The Pi**: `herdr-db` (Postgres 18) on `127.0.0.1:5440`, in UTC, with `herdr-sql` in front of it answering the same protocol at `https://<pi host>:8097`. It's reachable on the tailnet only, through `tailscale serve`. A request's `Neon-Connection-String` header must carry the database password. `scripts/deploy-pi` brings both up and the first time creates `data/db.env` with the `herdr` and `replicator` passwords.
+- **The Pi** (recommended): `scripts/deploy-pi --board-only` runs Postgres and the gateway there; details below.
+- **Neon**: answers `/sql` itself. Nothing to run.
+- **Supabase or any other Postgres**: `scripts/deploy-gateway` runs the gateway in Docker on an always-on machine, from `HERDR_DATABASE_URL` (the config's `board.url`), published on the tailnet when Tailscale is there.
+
+`schema/0001_board.sql` creates the whole board; `scripts/migrate` applies it and any later files once, recorded in `schema_migrations`.
+
+On the Pi: `herdr-db` (Postgres 18) on `127.0.0.1:5440`, in UTC, with `herdr-sql` in front of it answering the same protocol at `https://<pi host>:8097`. It's reachable on the tailnet only, through `tailscale serve`. A request's `Neon-Connection-String` header must carry the database password. `scripts/deploy-pi` brings both up and the first time creates `data/db.env` with the `herdr` and `replicator` passwords.
 
 With the board on the Pi, one machine can keep a standby. `herdr-db-standby` streams every change from the Pi (a replication slot named after the machine, through `tailscale serve --tcp=5440` on the Pi). Its own `herdr-sql` answers at `https://<standby.host>:8097` and refuses writes while it is a standby. `scripts/deploy-standby`, run on that machine, sets both up in `standby.dir` from `origin/main`; its first run copies the Pi's database with `pg_basebackup`. While that machine is off, the Pi keeps up to 2 GB of changes for it. Past that, stop `herdr-db-standby`, delete `<standby.dir>/standby/data/postgres` (owned by the container's postgres user, so `sudo rm -rf`) and run `scripts/deploy-standby` again.
 
@@ -242,7 +278,7 @@ When the Pi is down, `scripts/board-failover` on the standby's machine promotes 
 
 ### Digest
 
-At 19:00 Pi time the `digest` job reads the day's `task_events` and the board and writes a row to `digests` (schema/0016): today's picks and how they ended, what moved to Done, what waits for your review, agents asking, and what is still in progress. With `recaps` on it adds each task agent's reports of the day. The Today view shows the latest one, and a push goes to ntfy unless nothing changed all day. `[digest]` in `pi.toml` sets the time and the recaps; `POST /jobs/digest/run` writes today's now.
+At 19:00 Pi time the `digest` job reads the day's `task_events` and the board and writes a row to `digests`: today's picks and how they ended, what moved to Done, what waits for your review, agents asking, and what is still in progress. With `recaps` on it adds each task agent's reports of the day. The Today view shows the latest one, and a push goes to ntfy unless nothing changed all day. `[digest]` in `pi.toml` sets the time and the recaps; `POST /jobs/digest/run` writes today's now.
 
 ### Phone alerts
 

@@ -1,4 +1,4 @@
-// Task history from task_events (schema/0013): who moved, started, reported on or edited a
+// Task history from task_events (schema/0001_board.sql): who moved, started, reported on or edited a
 // task and when, and putting a change back. A change can be undone while the task still
 // holds what it set; a deleted task comes back with its dependencies.
 import { sql } from "./db.js";

@@ -3,6 +3,8 @@ import os
 import urllib.request
 from pathlib import Path
 
+from herdr_config import sql_endpoint
+
 BOARD_CONFIG = Path(os.environ.get("HERDR_BOARD_CONFIG", Path.home() / ".config/herdr-board/config.json"))
 
 
@@ -10,7 +12,7 @@ def query(sql: str, params: list[str | None]) -> list[dict]:
     config = json.loads(BOARD_CONFIG.read_text())
     board = config["board"]
     request = urllib.request.Request(
-        f"https://{board['host']}/sql",
+        sql_endpoint(board['host']),
         data=json.dumps({"query": sql, "params": params}).encode(),
         headers={"Content-Type": "application/json", "Neon-Connection-String": board["url"]},
         method="POST",
