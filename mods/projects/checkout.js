@@ -41,7 +41,7 @@ async function startClone(url, folder, log, machine) {
 async function cloneOn(url, folder, machine) {
   const home = machineInfo().homes?.[machine];
   if (!home) throw new Error(`${machineLabel(machine)}'s home folder isn't known yet`);
-  const log = `${home}/.cache/herdr-projects/clone-${folder.split("/").filter(Boolean).pop()}.log`;
+  const log = `${home}/.cache/herdr-corral/clone-${folder.split("/").filter(Boolean).pop()}.log`;
   await startClone(url, folder, log, machine);
   const started = Date.now();
   while (Date.now() - started < CLONE_LIMIT_MS) {

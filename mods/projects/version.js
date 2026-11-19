@@ -10,8 +10,8 @@ const UPDATED_KEY = "version.updated";
 const PENDING_TIMEOUT = 180000;
 const UPDATED_NOTICE = 15 * 60000;
 
-const clonePath = () => `${home()}/git/herdr-projects`;
-const logPath = () => `${home()}/.cache/herdr-projects/catch-up.log`;
+const clonePath = () => `${home()}/git/herdr-corral`;
+const logPath = () => `${home()}/.cache/herdr-corral/catch-up.log`;
 
 const CATCH_UP = `
 mkdir -p "$(dirname "$3")"

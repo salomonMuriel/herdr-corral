@@ -1,4 +1,4 @@
-# herdr-projects
+# herdr-corral
 
 Installing it? Follow `INSTALL.md` and check with `scripts/doctor`.
 

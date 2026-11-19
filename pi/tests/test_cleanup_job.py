@@ -34,7 +34,7 @@ async def test_cleanup_moves_on_when_a_machine_is_unreachable() -> None:
 
 async def test_cleanup_moves_on_when_a_machine_has_no_script() -> None:
     remote = FakeRemote({
-        "desk": HcResult(127, "", "sh: ~/git/herdr-projects/scripts/nightly-cleanup: not found"),
+        "desk": HcResult(127, "", "sh: ~/git/herdr-corral/scripts/nightly-cleanup: not found"),
         "laptop": HcResult(0, "removed 0, 1 to review\n", ""),
     })
     job = cleanup_job(settings(), remote)

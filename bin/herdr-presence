@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-WINDOW_FILE = Path.home() / ".cache/herdr-projects/window.json"
+WINDOW_FILE = Path.home() / ".cache/herdr-corral/window.json"
 WINDOW_STALE_SECONDS = 90
 
 

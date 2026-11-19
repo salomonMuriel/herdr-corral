@@ -1,6 +1,6 @@
-# Installing herdr-projects
+# Installing herdr-corral
 
-A coding agent can follow these steps to install herdr-projects for someone who already
+A coding agent can follow these steps to install herdr-corral for someone who already
 uses [Herdr](https://herdr.dev), on one machine or several. The shared board needs a Postgres
 database: the recommended setup is Postgres on a small always-on box on your tailnet, and
 Neon, Supabase or any other Postgres work too ([docs/database.md](docs/database.md)).
@@ -105,10 +105,10 @@ Then open the Herdr app once **(person)**, so it creates `~/.config/herdr-app`.
 
 ## 4. Clone the repo (each machine)
 
-The path must be exactly `~/git/herdr-projects`, because the mod runs scripts from there.
+The path must be exactly `~/git/herdr-corral`, because the mod runs scripts from there.
 
 ```sh
-git clone https://github.com/salomonMuriel/herdr-projects.git ~/git/herdr-projects
+git clone https://github.com/salomonMuriel/herdr-corral.git ~/git/herdr-corral
 # or the person's fork
 ```
 
@@ -119,7 +119,7 @@ that's where the sidebar looks for them.
 
 ```sh
 mkdir -p ~/.config/herdr-board
-cp ~/git/herdr-projects/examples/config.example.json ~/.config/herdr-board/config.json
+cp ~/git/herdr-corral/examples/config.example.json ~/.config/herdr-board/config.json
 chmod 600 ~/.config/herdr-board/config.json
 hostname    # run on each machine, for "machines"
 ```
@@ -151,7 +151,7 @@ With one machine, `machines` and `hosts` have one entry each (its `ssh` can be l
 | `pi` | the board's box, with option 1 of step 6 |
 | `cleanup.neon_projects` | Neon projects (names or ids) whose branches cleanup may delete; none when unset |
 
-Verify: `python3 ~/git/herdr-projects/scripts/herdr_config.py self` prints this machine's
+Verify: `python3 ~/git/herdr-corral/scripts/herdr_config.py self` prints this machine's
 name, the same one used in `hosts`.
 
 ## 6. Set up the board's database (once)
@@ -186,13 +186,13 @@ hc machine ls                                         # each shows "connected"
 On `desk` that's `hc machine add jo@laptop --name laptop --install`; on `laptop`,
 `hc machine add jo@desk --name desk --install`.
 
-Check each machine: `cd ~/git/herdr-projects && scripts/doctor --before-deploy`. Everything
+Check each machine: `cd ~/git/herdr-corral && scripts/doctor --before-deploy`. Everything
 up to the board should pass.
 
 ## 8. Create the tables (once, any machine)
 
 ```sh
-cd ~/git/herdr-projects && scripts/migrate
+cd ~/git/herdr-corral && scripts/migrate
 ```
 
 On an empty database it applies `schema/0001_board.sql`, which creates the whole board,
@@ -203,7 +203,7 @@ turns on row-level security on the board's tables (docs/database.md explains why
 ## 9. Deploy (once, any machine)
 
 ```sh
-cd ~/git/herdr-projects && scripts/deploy
+cd ~/git/herdr-corral && scripts/deploy
 ```
 
 It copies the mod, layout, theme, key bindings and `hb` tools to every machine in `hosts`
@@ -215,7 +215,7 @@ Herdr window opens or comes forward. `scripts/deploy --local` deploys to this ma
 
 ```sh
 herdr-app do layout.switch --name projects-dracula
-cd ~/git/herdr-projects && scripts/doctor     # should end with "All good."
+cd ~/git/herdr-corral && scripts/doctor     # should end with "All good."
 ```
 
 Keys (Linux / macOS): `ctrl-alt-b` / `cmd-k` board, `ctrl-alt-y` / `cmd-y` Today,
@@ -240,7 +240,7 @@ was left behind, on every machine, and shows the result in the sidebar footer. A
 one machine's crontab (`crontab -e`):
 
 ```cron
-30 3 * * * $HOME/git/herdr-projects/scripts/nightly-cleanup >> $HOME/.cache/herdr-projects/nightly-cleanup.log 2>&1
+30 3 * * * $HOME/git/herdr-corral/scripts/nightly-cleanup >> $HOME/.cache/herdr-corral/nightly-cleanup.log 2>&1
 ```
 
 With the full Pi service ([docs/pi.md](docs/pi.md)) the box runs it instead.
@@ -260,7 +260,7 @@ config to every machine, run step 7 on every machine, then `scripts/deploy` from
 ## Updating
 
 ```sh
-cd ~/git/herdr-projects && git pull --ff-only && scripts/migrate && scripts/deploy
+cd ~/git/herdr-corral && git pull --ff-only && scripts/migrate && scripts/deploy
 ```
 
 With a fork, merge upstream into its `main` and push first. Windows that were closed
@@ -279,7 +279,7 @@ Switch layouts (`ctrl-alt-shift-escape`), then remove `~/.config/herdr-app/mods/
 - `scripts/doctor` first.
 - `herdr-app status` shows the window's errors; `~/.config/herdr-app/*.error` shows files
   Herdr refused.
-- Logs are in `~/.cache/herdr-projects/`.
+- Logs are in `~/.cache/herdr-corral/`.
 - A run doesn't start anything: the window of the run's machine must be open on
   `projects-dracula`.
 - `Board config missing` in the sidebar: step 5 on that machine.

@@ -14,8 +14,8 @@ const STALE_MS = 45 * 60000;
 const LAUNCH = 'log="$1"; shift; mkdir -p "$(dirname "$log")"; echo "== $(date)" >> "$log"; nohup "$@" >> "$log" 2>&1 < /dev/null &';
 
 const scriptPath = () => `${home()}/.config/herdr-app/mods/projects/agent/code_review.py`;
-const logPath = () => `${home()}/.cache/herdr-projects/code-review.log`;
-const resultPath = (taskId, round) => `${home()}/.cache/herdr-projects/code-review/${taskId}-${round}.json`;
+const logPath = () => `${home()}/.cache/herdr-corral/code-review.log`;
+const resultPath = (taskId, round) => `${home()}/.cache/herdr-corral/code-review/${taskId}-${round}.json`;
 
 async function claim(task) {
   const [rows] = await transaction([[`update tasks set code_review_state = 'running', code_review_round = code_review_round + 1,

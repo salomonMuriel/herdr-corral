@@ -1,4 +1,4 @@
-# herdr-projects
+# herdr-corral
 
 A project-first workspace for [Herdr](https://herdr.dev) when you run many coding agents
 (Claude Code, Codex) across many repos and more than one machine. It groups every agent
@@ -58,10 +58,10 @@ from `~/.config/herdr-board/config.json`.
 
 - Herdr window (one per machine, layout `projects-dracula`): the `projects` mod draws the sidebar (a rail of project marks, split by short rules into companies, clients and side projects, beside a project > repo > session tree; a project's mark and tree row show its session count, and the row's `N open` counts its tasks that aren't Done), the board, Today and the top bar. Each window's leader pulls the board, starts run tasks for its own machine only, and cleans up after Done tasks on its own machine.
 - herdr-core (`hc`) on each machine runs every terminal and agent; every window sees every machine's sessions.
-- Repos live in `~/git/<repo>` on each machine unless a repo records its own folder. A repo grouped one folder down is named `<group>/<repo>` (`acme/frontend`), and the project dialog offers those next to the top-level folders. Typing a name that isn't a repo yet offers `Create <name>`: it runs `git init` in `~/git/<name>` on this machine and makes a private GitHub repo as its `origin`, owned by whoever owns the other repos in that group folder, or your account. A name without a group joins the group the project's repos share. Starting a session in a repo the machine doesn't have clones it there first, from the `origin` of a machine that has it (log: `~/.cache/herdr-projects/clone-<repo>.log`). An existing checkout is never pulled.
+- Repos live in `~/git/<repo>` on each machine unless a repo records its own folder. A repo grouped one folder down is named `<group>/<repo>` (`acme/frontend`), and the project dialog offers those next to the top-level folders. Typing a name that isn't a repo yet offers `Create <name>`: it runs `git init` in `~/git/<name>` on this machine and makes a private GitHub repo as its `origin`, owned by whoever owns the other repos in that group folder, or your account. A name without a group joins the group the project's repos share. Starting a session in a repo the machine doesn't have clones it there first, from the `origin` of a machine that has it (log: `~/.cache/herdr-corral/clone-<repo>.log`). An existing checkout is never pulled.
 - The board lives in Postgres (projects, repos, tasks, dependencies, runs, history): on the Pi with an optional standby, on Neon, or any other Postgres behind the `herdr-sql` gateway (see Board database). Every machine reads and writes it over HTTP with Neon's `/sql` protocol. Dialogs and popups don't write to it themselves: Herdr cancels a closed overlay's requests after 250 ms, too soon for a round trip, so they queue their writes and starts in shared state and the sidebar's leader sends them. A dropped project logo is read in the dialog and queued the same way. Nothing reads the board on a timer. A window pulls when it starts, when it comes forward and after every write made on its machine, by the window itself or by `hb` and `scripts/task-cleanup` (which run `herdr-app do projects.wrote`). After such a write it also tells the other machines' windows to pull (`herdr-app do projects.pull` over ssh). A pull that was already under way fetches again so it can't bring back older rows. An archived project's repos, tasks, runs and coordinator stay out of pulls, so its sessions show as not in a project.
 - The Pi is the always-on part, on any small Linux box with Docker on your tailnet: the board's database in the recommended setup and, optionally, `herdr-pi` for phone alerts (ntfy), the tailnet web page and approvals, the nightly cleanup, the board backup and the daily digest.
-- Your clone of this repo at `~/git/herdr-projects` on every machine is the source. Nothing is edited in `~/.config/herdr-app` directly: work is merged to `main` and `scripts/deploy` copies it to every machine in the config (`scripts/deploy-pi` for the Pi).
+- Your clone of this repo at `~/git/herdr-corral` on every machine is the source. Nothing is edited in `~/.config/herdr-app` directly: work is merged to `main` and `scripts/deploy` copies it to every machine in the config (`scripts/deploy-pi` for the Pi).
 
 ## Working day to day
 
@@ -69,7 +69,7 @@ from `~/.config/herdr-board/config.json`.
 2. Click Run this chain on a To do card, or shift-click cards and click Run selected. Pick the machine, agent, mode and review. Nothing starts without a click.
 3. Each task gets its own worktree and an unattended agent (see below). It reports with `hb note` / `hb ask` / `hb done`; with code review on, a `/code-review` pass runs before the card moves on.
 4. Cards in Review wait for you; the agent's session stays open until the card is Done. Open it (its row in the sidebar), ask for a write-up of the changes and decisions if it hasn't given one, push back there, and click Approve when you're happy. Tasks downstream start as their dependencies reach Done and merge.
-5. Deploy when you've reviewed: tell the reviewing agent "deploy it", or run `cd ~/git/herdr-projects && git pull --ff-only && scripts/deploy`. Finished sessions close and merged worktrees and Neon branches are removed on their own; `scripts/cleanup` lists what's left.
+5. Deploy when you've reviewed: tell the reviewing agent "deploy it", or run `cd ~/git/herdr-corral && git pull --ff-only && scripts/deploy`. Finished sessions close and merged worktrees and Neon branches are removed on their own; `scripts/cleanup` lists what's left.
 
 ## Layout
 
@@ -79,8 +79,8 @@ from `~/.config/herdr-board/config.json`.
 - `bin/herdr-ask`: copied to `~/.local/bin/herdr-ask`. `scripts/merge_hooks.py` adds it to `~/.claude/settings.json` as Claude Code hooks next to the hooks already there, replacing only its own earlier entries.
 - `bin/herdr-approve`: copied to `~/.local/bin/herdr-approve`. `scripts/merge_hooks.py` adds it as a PermissionRequest hook, so the Pi's web page can answer Claude Code's permission prompts (see Approvals).
 - `bin/herdr-presence`: copied to `~/.local/bin/herdr-presence`. Prints whether this machine's Herdr window is in front and how long since the last keyboard or mouse input, for the Pi's phone alerts.
-- `scripts/task-cleanup`, `scripts/handoff`: run by the window from `~/git/herdr-projects`, not copied.
-- `scripts/nightly-cleanup`: run by the Pi over ssh from `~/git/herdr-projects`, not copied.
+- `scripts/task-cleanup`, `scripts/handoff`: run by the window from `~/git/herdr-corral`, not copied.
+- `scripts/nightly-cleanup`: run by the Pi over ssh from `~/git/herdr-corral`, not copied.
 - `schema/`: the board's schema. `0001_board.sql` creates the whole board; later changes go in new numbered files, applied in order by `scripts/migrate`, which records them in `schema_migrations`. A standby follows on its own. Apply a migration before deploying the code that reads it, and one that drops columns after the code that stopped reading them is live.
 - `scripts/herdr_config.py`: reads the machine config for the scripts (`self`, `machines`, `ssh <machine>`, `get <key>`).
 - `scripts/doctor`: checks this machine's install and prints the fix for each problem.
@@ -94,7 +94,7 @@ Each project picks who checks a task before it counts as done: None, Code review
 
 ## Code review
 
-With code review on, `hb done` doesn't move the card. It queues a review (`code_review_state`), and the window of the task's machine runs `mods/projects/agent/code_review.py` detached: `claude -p` in the task's worktree runs `/code-review` on the branch against main, with the task's title and notes as the requirements, under the run guard and without edit tools. It is told to report only real issues (bugs, broken behaviour, data loss, security holes, production failures, clear misses of the task's requirements) and to pass when there are none. The verdict lands in `~/.cache/herdr-projects/code-review/<task>-<round>.json`, the log in `~/.cache/herdr-projects/code-review.log`.
+With code review on, `hb done` doesn't move the card. It queues a review (`code_review_state`), and the window of the task's machine runs `mods/projects/agent/code_review.py` detached: `claude -p` in the task's worktree runs `/code-review` on the branch against main, with the task's title and notes as the requirements, under the run guard and without edit tools. It is told to report only real issues (bugs, broken behaviour, data loss, security holes, production failures, clear misses of the task's requirements) and to pass when there are none. The verdict lands in `~/.cache/herdr-corral/code-review/<task>-<round>.json`, the log in `~/.cache/herdr-corral/code-review.log`.
 
 Findings go to the task's agent with `hc send`; it fixes them, commits and runs `hb done` again, which starts the next round. After a pass, a task you review moves to Review; one you don't gets "merge and push, then hb done", and that `hb done` moves it to Done. The card reads `Code review passed`. Still open after 3 rounds, the card moves to Review with `Code review: N open after 3 rounds` and asks you, so nothing downstream starts. A review that can't run, or has no verdict after 45 minutes, asks you the same way.
 
@@ -219,7 +219,7 @@ Move to <machine> in a session's menu, or `scripts/handoff <terminal> <machine>`
 
 The worktree's work, untracked files included, is committed to `handoff/<name>` without touching the source's branch or index, carried over in a git bundle and checked out on the target as the same branch at the same commit, with the changes uncommitted again. A target folder that already exists is never written over. Ignored files don't come along: the source worktree is removed afterwards only when it holds nothing ignored beyond what a build or install makes again (`node_modules`, `.venv`, `dist` and the like); otherwise it stays and the log says why. `--keep-source` always keeps it. A session in a main checkout moves only when that checkout is clean, into the target's checkout as it is.
 
-The new tab opens in the repo's space on the target, the card (or the task's row for that repo) points at it, and the old tab closes. The card reads `Moved to <machine> …`, or `Move to <machine> failed: …`. When something fails before the new session starts, the target's copies are removed and the conversation resumes on the source in a new tab. The log is `~/.cache/herdr-projects/handoff.log`.
+The new tab opens in the repo's space on the target, the card (or the task's row for that repo) points at it, and the old tab closes. The card reads `Moved to <machine> …`, or `Move to <machine> failed: …`. When something fails before the new session starts, the target's copies are removed and the conversation resumes on the source in a new tab. The log is `~/.cache/herdr-corral/handoff.log`.
 
 ## Cleanup
 
@@ -237,7 +237,7 @@ The sidebar footer shows the last run, e.g. `Cleanup: 3 to review · 4.2 GB · N
 
 When a task reaches Done, the window of its machine closes the task's session once its agent and every helper it started (`hc run` terminals whose parent leads back to the tab) have sat idle for 15 seconds: it ends the helpers and closes the tab, whether or not the worktree stays. A session that is working, blocked, or in front of you in the active window is left open, and a session no task is linked to is never closed. The card says `Session closed` and keeps the agent's last report; Herdr's recent list keeps the space.
 
-The worktree waits for the merge and uses `scripts/task-cleanup` with the same rules. Once the task's branch is on main and its session is closed, the window removes the worktree (never with `--force`) and the branch, and deletes Neon branches named after the git branch. The card says `Worktree removed, <size> freed`, or why it was kept: a branch not yet on main, uncommitted files, a process still inside. Kept worktrees stay on `scripts/cleanup`'s list with the same reason. Only tasks started with a recorded branch are cleaned; the run's log is `~/.cache/herdr-projects/task-cleanup.log`. The script runs from `~/git/herdr-projects`, so it needs `uv`, and `gh` and `neonctl` for squash merges and Neon.
+The worktree waits for the merge and uses `scripts/task-cleanup` with the same rules. Once the task's branch is on main and its session is closed, the window removes the worktree (never with `--force`) and the branch, and deletes Neon branches named after the git branch. The card says `Worktree removed, <size> freed`, or why it was kept: a branch not yet on main, uncommitted files, a process still inside. Kept worktrees stay on `scripts/cleanup`'s list with the same reason. Only tasks started with a recorded branch are cleaned; the run's log is `~/.cache/herdr-corral/task-cleanup.log`. The script runs from `~/git/herdr-corral`, so it needs `uv`, and `gh` and `neonctl` for squash merges and Neon.
 
 ## Pi service
 
@@ -281,7 +281,7 @@ At 19:00 Pi time the `digest` job reads the day's `task_events` and the board an
 
 ### Phone alerts
 
-The service pushes to `herdr-ntfy`, a self-hosted ntfy container beside it, when an agent has been blocked for 2 minutes, or 5 seconds after it finishes (working to done or idle) if it hasn't gone back to work. It pushes only while you are away: no Herdr window is in front, or the one in front has had no input for 2 minutes. Before each push it runs `herdr-presence` on every machine over ssh; the mod writes the window's state to `~/.cache/herdr-projects/window.json` every 30 s, so an older file counts as a closed window. Each push opens that agent's page on the tailnet web page. Topic, delays and links are in `pi.toml` under `[alerts]`.
+The service pushes to `herdr-ntfy`, a self-hosted ntfy container beside it, when an agent has been blocked for 2 minutes, or 5 seconds after it finishes (working to done or idle) if it hasn't gone back to work. It pushes only while you are away: no Herdr window is in front, or the one in front has had no input for 2 minutes. Before each push it runs `herdr-presence` on every machine over ssh; the mod writes the window's state to `~/.cache/herdr-corral/window.json` every 30 s, so an older file counts as a closed window. Each push opens that agent's page on the tailnet web page. Topic, delays and links are in `pi.toml` under `[alerts]`.
 
 To get them, install the ntfy app on the phone (on the tailnet), add the server `https://<pi host>:2586` and subscribe to `herdr`. ntfy is reachable only on the tailnet, through `tailscale serve`, so anyone on the tailnet can subscribe.
 
@@ -297,13 +297,13 @@ The page has its own listener on `127.0.0.1:8096`, published with `tailscale ser
 
 When Claude Code asks for permission in a Herdr terminal, `herdr-approve` posts the request to the web page (`POST /api/approvals`, through the same `tailscale serve` address and login check) and waits up to 900 s for an answer. Claude Code shows its own prompt the whole time and takes whichever answer comes first. The agent's card on the page shows the tool, what it runs or touches, and Allow, Always allow (the rule the prompt would save, when it offers one) and Deny with an optional reason. With no answer in time, or no web page (`pi.web` unset in the config), the hook prints nothing and the prompt stays.
 
-Answering in the terminal withdraws the request: the Pi drops it once the agent leaves blocked, and the hook withdraws it when Claude Code ends it. Questions and plan approvals are left to the card's keys. The hook's errors go to `~/.cache/herdr-projects/approve.log`; `HERDR_PI_URL` and `HERDR_MACHINE` override the address and the machine name.
+Answering in the terminal withdraws the request: the Pi drops it once the agent leaves blocked, and the hook withdraws it when Claude Code ends it. Questions and plan approvals are left to the card's keys. The hook's errors go to `~/.cache/herdr-corral/approve.log`; `HERDR_PI_URL` and `HERDR_MACHINE` override the address and the machine name.
 
 ## Deploy
 
 `scripts/deploy` from any machine copies this checkout's `main` to every machine in `hosts` over SSH and runs `herdr-app check` on the mod on each. It only deploys a clean `main` that matches `origin/main`. Each machine that passes gets `mods/projects/VERSION` (sha, time, deploying machine), and the deploy is recorded in the `deployments` table. A machine that can't be reached is skipped.
 
-When a window starts or comes forward, it compares its `VERSION` with the newest deployment. If it is behind, it pulls `~/git/herdr-projects` (`git pull --ff-only`, which must be on `main`) and runs `scripts/deploy --local`. The sidebar footer shows the running commit, `Updated to <sha>` after a catch-up, or `Behind: running <old>, latest <new>` in red when the catch-up fails. The catch-up log is at `~/.cache/herdr-projects/catch-up.log`.
+When a window starts or comes forward, it compares its `VERSION` with the newest deployment. If it is behind, it pulls `~/git/herdr-corral` (`git pull --ff-only`, which must be on `main`) and runs `scripts/deploy --local`. The sidebar footer shows the running commit, `Updated to <sha>` after a catch-up, or `Behind: running <old>, latest <new>` in red when the catch-up fails. The catch-up log is at `~/.cache/herdr-corral/catch-up.log`.
 
 The board's address and credentials live outside the repo in `~/.config/herdr-board/config.json` (`board.host`, `board.url`). With the board on the Pi, its database passwords are in `~/herdr-pi/data/db.env` there.
 
@@ -311,10 +311,10 @@ The board's address and credentials live outside the repo in `~/.config/herdr-bo
 
 - A run doesn't start anything: the window of the run's machine must be open on `projects-dracula`; runs start from that window. On a Linux machine it can be opened remotely: `ssh desk 'DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority setsid nohup ~/.local/bin/herdr-app >/tmp/herdr-app.log 2>&1 </dev/null &'`, then `herdr-app do layout.switch --name projects-dracula` there. A card's line says why a task waits (slots, an unmerged dependency, folder trust).
 - An agent is stuck: Needs you shows what it waits on; reply from the sidebar, the board card, or the Pi page. Text greyed out in an agent's input box is Claude Code's suggested next prompt, not something typed.
-- A machine runs old code: the sidebar footer shows the running commit; a window behind the latest deploy catches up when it comes forward (`~/.cache/herdr-projects/catch-up.log`).
+- A machine runs old code: the sidebar footer shows the running commit; a window behind the latest deploy catches up when it comes forward (`~/.cache/herdr-corral/catch-up.log`).
 - The window breaks after a deploy: `ctrl-alt-shift-escape` switches to Herdr's default layout; fix on a branch, merge, deploy again. Run `herdr-app check <worktree>/mods/projects` before merging, and avoid circular imports between mod files, which can crash the window.
 - The Pi is down: a board on the Pi is down with it. If it won't come back soon, run `scripts/board-failover` on the standby's machine (see Board database).
-- Logs are in `~/.cache/herdr-projects/` (task-cleanup, code-review, handoff, approve, catch-up).
+- Logs are in `~/.cache/herdr-corral/` (task-cleanup, code-review, handoff, approve, catch-up).
 
 ## License
 

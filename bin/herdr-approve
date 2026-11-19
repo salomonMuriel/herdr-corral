@@ -25,7 +25,7 @@ CONFIG_PATH = Path(os.environ.get("HERDR_BOARD_CONFIG", Path.home() / ".config/h
 DEFAULT_WAIT_SECONDS = 900.0
 POLL_SECONDS = 25
 RETRY_SECONDS = 3.0
-LOG = Path.home() / ".cache/herdr-projects/approve.log"
+LOG = Path.home() / ".cache/herdr-corral/approve.log"
 # Questions need answers, and a plan approval also picks a mode; the page's keys handle both.
 SKIPPED_TOOLS = {"AskUserQuestion", "ExitPlanMode"}
 DETAIL_LIMIT = 6000

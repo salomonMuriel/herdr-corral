@@ -44,7 +44,7 @@ class Settings(BaseModel):
     stall_seconds: float = 45.0
     # Pi local time. The command runs on the first machine that answers, in the order above.
     cleanup_at: time = time(3, 30)
-    cleanup_command: str = "~/git/herdr-projects/scripts/nightly-cleanup"
+    cleanup_command: str = "~/git/herdr-corral/scripts/nightly-cleanup"
     # The board's Postgres (herdr-db), dumped nightly at backup_at, Pi local time.
     db_port: int = 5440
     backup_at: time = time(3, 0)

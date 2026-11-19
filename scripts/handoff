@@ -28,7 +28,7 @@ from handoff_lib import board, terminal  # noqa: E402
 from handoff_lib.machines import HandoffError, known_machines, label  # noqa: E402
 from handoff_lib.move import move, say  # noqa: E402
 
-LOCK_DIR = Path.home() / ".cache/herdr-projects"
+LOCK_DIR = Path.home() / ".cache/herdr-corral"
 
 
 def parse_args() -> argparse.Namespace:

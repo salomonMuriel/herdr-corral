@@ -13,8 +13,8 @@ import { partsOf, partKey, recordPartCleanup } from "./task-repos.js";
 const RUN_TIMEOUT_MS = 5 * 60000;
 const DAY_MS = 24 * 3600000;
 
-const scriptPath = () => `${home()}/git/herdr-projects/scripts/task-cleanup`;
-const logPath = () => `${home()}/.cache/herdr-projects/task-cleanup.log`;
+const scriptPath = () => `${home()}/git/herdr-corral/scripts/task-cleanup`;
+const logPath = () => `${home()}/.cache/herdr-corral/task-cleanup.log`;
 
 const LAUNCH = 'log="$1"; shift; mkdir -p "$(dirname "$log")"; echo "== $(date) $3" >> "$log"; nohup "$@" >> "$log" 2>&1 &';
 

@@ -5,8 +5,8 @@ import { exec, home, notify } from "herdr";
 import { machineInfo, machineLabel } from "./machines.js";
 import { isClaudeCommand } from "./trust.js";
 
-const scriptPath = () => `${home()}/git/herdr-projects/scripts/handoff`;
-const logPath = () => `${home()}/.cache/herdr-projects/handoff.log`;
+const scriptPath = () => `${home()}/git/herdr-corral/scripts/handoff`;
+const logPath = () => `${home()}/.cache/herdr-corral/handoff.log`;
 
 const LAUNCH = 'log="$1"; shift; mkdir -p "$(dirname "$log")"; echo "== $(date) $2 to $3" >> "$log"; nohup "$@" >> "$log" 2>&1 &';
 

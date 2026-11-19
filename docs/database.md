@@ -49,7 +49,7 @@ On your machine, add the box to the config:
 `host` is the box's MagicDNS name (`tailscale status` lists it). Then:
 
 ```sh
-cd ~/git/herdr-projects && scripts/deploy-pi --board-only --set-board
+cd ~/git/herdr-corral && scripts/deploy-pi --board-only --set-board
 ```
 
 It starts `herdr-db` and `herdr-sql` in `~/herdr-pi` on the box, generates the database
@@ -99,7 +99,7 @@ Put it in `board.url` (any `host` for now), then run the gateway on an always-on
 with Docker:
 
 ```sh
-cd ~/git/herdr-projects && scripts/deploy-gateway
+cd ~/git/herdr-corral && scripts/deploy-gateway
 ```
 
 It writes `board.host` for you.

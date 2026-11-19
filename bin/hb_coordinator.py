@@ -20,7 +20,7 @@ IMPORTANCE = ("urgent", "high", "normal", "low")
 ASK_LABEL = "herdr.coordinator.ask"
 ASKED_LABEL = "herdr.coordinator.asked"
 # bin/herdr-ask clears the question when the person answers in the terminal.
-ASK_MARKERS = Path.home() / ".cache/herdr-projects/coordinator-ask"
+ASK_MARKERS = Path.home() / ".cache/herdr-corral/coordinator-ask"
 DONE_SHOWN = 8
 REPORT_CHARS = 240
 SECTIONS = (("doing", "In progress"), ("review", "Review (waits for the person)"), ("todo", "To do"), ("done", "Done lately"))

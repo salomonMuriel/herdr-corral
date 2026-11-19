@@ -4,7 +4,7 @@
 import { exec } from "herdr";
 
 const HEARTBEAT_MS = 30000;
-const WRITE_SCRIPT = `dir="$HOME/.cache/herdr-projects"
+const WRITE_SCRIPT = `dir="$HOME/.cache/herdr-corral"
 mkdir -p "$dir" && printf '%s' "$1" > "$dir/window.json.tmp" && mv "$dir/window.json.tmp" "$dir/window.json"`;
 
 let written = { active: null, at: 0 };

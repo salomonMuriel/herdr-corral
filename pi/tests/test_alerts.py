@@ -39,7 +39,7 @@ class Harness:
 
 
 def agent(address: str, state: str, **extra: object) -> dict[str, object]:
-    labels = {"where": "herdr-projects / Phone alerts", "herdr.ask": "plan"}
+    labels = {"where": "herdr-corral / Phone alerts", "herdr.ask": "plan"}
     return {"address": address, "state": "live", "status": {"state": state}, "labels": labels, **extra}
 
 
@@ -51,7 +51,7 @@ async def test_finish_waits_out_the_debounce() -> None:
     assert harness.pushes == []
     await harness.after(2)
     [push] = harness.pushes
-    assert push.title == "herdr-projects / Phone alerts"
+    assert push.title == "herdr-corral / Phone alerts"
     assert push.message == "Finished on desk: Merged and pushed"
     assert push.click == "https://pi.example.ts.net:8096/agents/desk/t1"
 

@@ -23,9 +23,9 @@ from typing import Optional
 LABEL = "herdr.ask"
 ASK_BY_TOOL = {"ExitPlanMode": "plan", "AskUserQuestion": "question"}
 # Clearing runs after every tool call, so a marker file saves an hc call when nothing is set.
-MARKERS = Path.home() / ".cache/herdr-projects/ask"
+MARKERS = Path.home() / ".cache/herdr-corral/ask"
 # hb ask in a coordinator's session writes these; each holds the labelled terminal.
-COORDINATOR_MARKERS = Path.home() / ".cache/herdr-projects/coordinator-ask"
+COORDINATOR_MARKERS = Path.home() / ".cache/herdr-corral/coordinator-ask"
 COORDINATOR_LABELS = ("herdr.coordinator.ask", "herdr.coordinator.asked")
 # mods/projects/coordinator-watch.js starts every message it sends with this.
 BOARD_PREFIX = "[board]"

@@ -99,9 +99,9 @@ write_version() {
 sync_clone() {
   local machine="$1" head
   [[ "$machine" == "$self" ]] && return
-  head="$(run_on "$machine" 'cd "$HOME/git/herdr-projects" && [ "$(git symbolic-ref --quiet --short HEAD)" = main ] && git pull --ff-only --quiet origin main && git rev-parse HEAD' 2>&1)" || true
+  head="$(run_on "$machine" 'cd "$HOME/git/herdr-corral" && [ "$(git symbolic-ref --quiet --short HEAD)" = main ] && git pull --ff-only --quiet origin main && git rev-parse HEAD' 2>&1)" || true
   [[ "$head" == "$sha" ]] && return
-  echo "$machine: ~/git/herdr-projects isn't at ${sha:0:7}, so its scripts are stale: ${head##*$'\n'}" >&2
+  echo "$machine: ~/git/herdr-corral isn't at ${sha:0:7}, so its scripts are stale: ${head##*$'\n'}" >&2
   stale_clones+=("$machine")
 }
 
@@ -151,5 +151,5 @@ if (( ${#failed[@]} )); then
   echo "Check failed on: ${failed[*]}" >&2
   exit 1
 fi
-(( ${#stale_clones[@]} )) && echo "Pull ~/git/herdr-projects by hand on: ${stale_clones[*]}" >&2
+(( ${#stale_clones[@]} )) && echo "Pull ~/git/herdr-corral by hand on: ${stale_clones[*]}" >&2
 (( ${#targets[@]} )) || { echo "No machine reached" >&2; exit 1; }

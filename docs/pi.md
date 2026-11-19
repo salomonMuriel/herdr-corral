@@ -28,7 +28,7 @@ README.md, "Pi service", describes each part.
 1. On the machine you deploy from:
 
    ```sh
-   cp ~/git/herdr-projects/pi/config.example.toml ~/.config/herdr-board/pi.toml
+   cp ~/git/herdr-corral/pi/config.example.toml ~/.config/herdr-board/pi.toml
    ```
 
    Set `web_logins` to the person's Tailscale login, list every machine with the same names
@@ -37,7 +37,7 @@ README.md, "Pi service", describes each part.
 2. Deploy the whole service (the board's containers stay as they are):
 
    ```sh
-   cd ~/git/herdr-projects && scripts/deploy-pi
+   cd ~/git/herdr-corral && scripts/deploy-pi
    ```
 
    It adds `herdr-pi` and `herdr-ntfy`, publishes the web page (`:8096`) and ntfy (`:2586`)
