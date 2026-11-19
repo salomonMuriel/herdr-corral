@@ -1,0 +1,146 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pydantic>=2"]
+# ///
+"""List agent worktrees on both machines and Neon branches, and remove the safe ones you pick.
+
+Dry run by default. --apply asks which of the numbered (safe) items to remove. --auto removes
+every safe item without asking and records what is left to review on the board; the Pi runs
+it nightly through scripts/nightly-cleanup.
+"""
+import argparse
+import json
+import subprocess
+import sys
+import urllib.error
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from cleanup_lib import auto, board, neon, report, rules
+from cleanup_lib.github import github_slug, histories
+from cleanup_lib.machines import machines, current_machine, head_is_ancestor, scan_machine
+from cleanup_lib.models import Item, NeonBranch, Worktree
+from cleanup_lib.remove import remove
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true", help="choose safe items and remove them")
+    parser.add_argument("--auto", action="store_true", help="remove every safe item and record the rest on the board")
+    parser.add_argument("--no-fetch", action="store_true", help="skip git fetch in each repo")
+    parser.add_argument("--no-neon", action="store_true", help="leave Neon branches out")
+    return parser.parse_args()
+
+
+def skip(skipped: dict[str, str], source: str, why: str) -> None:
+    print(f"warning: {source} skipped: {why}", file=sys.stderr)
+    skipped[source] = why
+
+
+def scan_all(should_fetch: bool, skipped: dict[str, str]) -> list[Worktree]:
+    def scan(machine: str) -> list[Worktree]:
+        try:
+            return scan_machine(machine, should_fetch)
+        except (RuntimeError, subprocess.TimeoutExpired) as error:
+            skip(skipped, machine, str(error))
+            return []
+
+    with ThreadPoolExecutor(len(machines())) as pool:
+        return [worktree for found in pool.map(scan, machines()) for worktree in found]
+
+
+def neon_branches(skipped: dict[str, str]) -> list[NeonBranch]:
+    if not neon.available():
+        skip(skipped, "neon", "neonctl not found")
+        return []
+    try:
+        return neon.all_branches()
+    except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+        skip(skipped, "neon", str(error))
+        return []
+
+
+# Without the board an automatic run can't tell which worktrees open tasks still need.
+def board_tasks(required: bool) -> list[dict]:
+    try:
+        return board.tasks()
+    except (OSError, ValueError, KeyError, urllib.error.URLError) as error:
+        if required:
+            raise SystemExit(f"board tasks unavailable: {error}")
+        print(f"warning: board tasks unavailable: {error}", file=sys.stderr)
+        return []
+
+
+def project_repo_slugs(branches: list[NeonBranch]) -> set[str]:
+    """GitHub repos of local checkouts named like a Neon project with branches to judge."""
+    names = {branch.project_name for branch in branches if not branch.is_default}
+    git_root = Path.home() / "git"
+    slugs = set()
+    for pattern in ("*", "*/*"):
+        for checkout in git_root.glob(pattern):
+            if checkout.name not in names or not (checkout / ".git").exists():
+                continue
+            origin = subprocess.run(["git", "-C", str(checkout), "remote", "get-url", "origin"],
+                                    capture_output=True, text=True).stdout.strip()
+            if slug := github_slug(origin):
+                slugs.add(slug)
+    return slugs
+
+
+def build_items(args: argparse.Namespace, skipped: dict[str, str]) -> tuple[list[Item], list[NeonBranch]]:
+    print("Scanning worktrees and Neon branches...", file=sys.stderr)
+    tasks = board_tasks(required=args.auto)
+    with ThreadPoolExecutor(2) as pool:
+        worktrees_future = pool.submit(scan_all, not args.no_fetch, skipped)
+        branches = [] if args.no_neon else neon_branches(skipped)
+        worktrees = worktrees_future.result()
+    slugs = {slug for worktree in worktrees if (slug := github_slug(worktree.origin))}
+    repo_histories = histories(slugs | project_repo_slugs(branches))
+    held = rules.open_task_names(tasks)
+    items = [rules.worktree_item(worktree, repo_histories, head_is_ancestor, held) for worktree in worktrees]
+    if branches:
+        finished = rules.finished_git_names(repo_histories)
+        done = rules.done_task_names(tasks)
+        items += [rules.neon_item(branch, finished, done, held) for branch in branches if not branch.is_default]
+    return report.ordered(items), branches
+
+
+def choose(items: list[Item]) -> list[Item]:
+    allowed = {number for number, item in enumerate(items, 1) if item.safe}
+    if not allowed:
+        print("Nothing is safe to remove.")
+        return []
+    while True:
+        answer = input("\nRemove which? Numbers like 1,3-5, 'all', or Enter for none: ")
+        try:
+            chosen = report.parse_selection(answer, allowed)
+            break
+        except ValueError as error:
+            print(error)
+    picked = [items[number - 1] for number in sorted(chosen)]
+    if not picked:
+        return []
+    total = report.human_size(sum(item.size_bytes for item in picked))
+    confirm = input(f"Remove {len(picked)} items ({total})? [y/N] ")
+    return picked if confirm.strip().lower() == "y" else []
+
+
+def main() -> None:
+    args = parse_args()
+    skipped: dict[str, str] = {}
+    items, branches = build_items(args, skipped)
+    if args.auto:
+        print(auto.summary(auto.run_auto(current_machine(), items, branches, skipped)))
+        return
+    report.print_table(items)
+    report.print_totals(items)
+    if not args.apply:
+        print("\nDry run. Run with --apply to choose what to remove.")
+        return
+    for item in choose(items):
+        print(f"{item.label} ({item.machine}): {remove(item)}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,20 @@
+{
+  "macos": {
+    "layout:projects-dracula": {
+      "cmd-k": "projects.board",
+      "cmd-shift-k": "projects.new-task",
+      "cmd-j": "projects.next-needs-you",
+      "cmd-y": "projects.today",
+      "cmd-shift-n": "projects.scratch"
+    }
+  },
+  "linux": {
+    "layout:projects-dracula": {
+      "ctrl-alt-b": "projects.board",
+      "ctrl-alt-n": "projects.new-task",
+      "ctrl-alt-j": "projects.next-needs-you",
+      "ctrl-alt-y": "projects.today",
+      "ctrl-alt-s": "projects.scratch"
+    }
+  }
+}

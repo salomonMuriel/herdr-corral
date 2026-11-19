@@ -1,0 +1,77 @@
+# scripts/deploy-pi copies this folder to the Pi and writes .env beside it (HERDR_TZ, HERDR_PI_HOST).
+services:
+  herdr-pi:
+    build: .
+    image: herdr-pi:local
+    container_name: herdr-pi
+    restart: unless-stopped
+    mem_limit: 256m
+    # Host networking so ssh reaches the machines by their tailnet names; the API
+    # listens on 127.0.0.1:8095 only.
+    network_mode: host
+    environment:
+      TZ: ${HERDR_TZ:-UTC}
+    env_file: ./data/db.env
+    volumes:
+      - ./data:/data
+
+  # The board. Listens on 127.0.0.1:5440; the standby (optional) reaches it through
+  # `tailscale serve --tcp`. UTC so timestamps read the same on every client.
+  herdr-db:
+    image: postgres:18
+    container_name: herdr-db
+    restart: unless-stopped
+    mem_limit: 256m
+    network_mode: host
+    env_file: ./data/db.env
+    environment:
+      POSTGRES_USER: herdr
+      POSTGRES_DB: herdr
+      # The server and `docker exec … psql` both default to PGPORT.
+      PGPORT: "5440"
+    command: >-
+      postgres -c listen_addresses=127.0.0.1 -c timezone=UTC
+      -c shared_buffers=32MB -c wal_level=replica -c max_slot_wal_keep_size=2GB
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+
+  # Neon's /sql protocol in front of herdr-db, on 127.0.0.1:8097 for `tailscale serve`.
+  herdr-sql:
+    build: .
+    image: herdr-pi:local
+    container_name: herdr-sql
+    restart: unless-stopped
+    mem_limit: 128m
+    network_mode: host
+    env_file: ./data/db.env
+    command: ["python", "-m", "herdr_pi.sql_gateway"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8097/health', timeout=4)"]
+      interval: 60s
+      timeout: 5s
+    depends_on:
+      - herdr-db
+
+  # Phone alerts. Reached by phones as https://<pi host>:2586 through tailscale serve.
+  herdr-ntfy:
+    image: binwiederhier/ntfy:v2.14.0
+    container_name: herdr-ntfy
+    command: serve
+    restart: unless-stopped
+    mem_limit: 128m
+    user: "1000:1000"
+    environment:
+      TZ: ${HERDR_TZ:-UTC}
+      NTFY_BASE_URL: https://${HERDR_PI_HOST}:2586
+      NTFY_LISTEN_HTTP: ":2586"
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+      NTFY_CACHE_DURATION: 24h
+      # iOS gets instant delivery for self-hosted servers only through ntfy.sh's relay,
+      # which sees a hash of the message id, never its text.
+      NTFY_UPSTREAM_BASE_URL: https://ntfy.sh
+    volumes:
+      - ./data/ntfy:/var/cache/ntfy
+    ports:
+      - "127.0.0.1:2586:2586"

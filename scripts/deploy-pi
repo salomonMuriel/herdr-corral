@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Build and restart herdr-pi on the Pi from origin/main's pi/ folder.
+# Works from any checkout or worktree: only what is pushed to main gets deployed.
+# Reads pi.ssh, pi.host and pi.dir from ~/.config/herdr-board/config.json and the service's
+# own settings from ~/.config/herdr-board/pi.toml (see pi/config.example.toml).
+set -euo pipefail
+
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+config="$repo/scripts/herdr_config.py"
+host="${HERDR_PI_SSH:-$(python3 "$config" get pi.ssh)}"
+pi_host="$(python3 "$config" get pi.host)"
+dest="$(python3 "$config" get pi.dir herdr-pi)"
+pi_settings="${HERDR_PI_SETTINGS:-$HOME/.config/herdr-board/pi.toml}"
+board_config="$HOME/.config/herdr-board/config.json"
+port=8095
+web_port=8096
+ntfy_port=2586
+sql_port=8097
+db_port=5440
+
+[[ -f "$pi_settings" ]] || { echo "No $pi_settings: copy pi/config.example.toml there and fill it in." >&2; exit 1; }
+
+git -C "$repo" fetch --quiet origin main
+sha="$(git -C "$repo" rev-parse origin/main)"
+
+build="$(mktemp -d)"
+trap 'rm -rf "$build"' EXIT
+git -C "$repo" archive origin/main pi | tar -x -C "$build"
+cp "$pi_settings" "$build/pi/config.toml"
+printf '%s %s %s\n' "${sha:0:7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname -s)" > "$build/pi/VERSION"
+printf 'HERDR_TZ=%s\nHERDR_PI_HOST=%s\n' "${HERDR_TZ:-$(ssh "$host" 'cat /etc/timezone 2>/dev/null || echo UTC')}" "$pi_host" > "$build/pi/.env"
+
+ssh "$host" "mkdir -p ~/$dest/data/ntfy ~/$dest/data/postgres"
+# The board's database passwords, made once. A standby copies this file.
+ssh "$host" "test -f ~/$dest/data/db.env || (umask 077 && for name in POSTGRES_PASSWORD REPLICATOR_PASSWORD; do
+  printf '%s=%s\\n' \$name \$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \\n'); done > ~/$dest/data/db.env)"
+rsync -a --delete --exclude data/ "$build/pi/" "$host:$dest/"
+# The web page adds tasks to the board with the same credentials as the machines.
+if [[ -f "$board_config" ]]; then
+  # macOS's openrsync has no --chmod, and umask keeps the file private from its first byte.
+  ssh "$host" "umask 077 && cat > ~/$dest/data/board.json" < "$board_config"
+fi
+ssh "$host" "cd ~/$dest && docker compose up -d --build"
+# Tailnet only, never funnel: the page answers the logins in pi.toml's web_logins.
+ssh "$host" "tailscale serve --bg --https=$web_port http://127.0.0.1:$web_port >/dev/null"
+ssh "$host" "tailscale serve --bg --https=$ntfy_port http://127.0.0.1:$ntfy_port >/dev/null"
+ssh "$host" "tailscale serve --bg --https=$sql_port http://127.0.0.1:$sql_port >/dev/null"
+# Replication for a standby; Postgres itself asks for the password.
+ssh "$host" "tailscale serve --bg --tcp=$db_port tcp://127.0.0.1:$db_port >/dev/null"
+
+for _ in $(seq 30); do
+  if health="$(ssh "$host" "curl -fsS http://127.0.0.1:$port/health" 2>/dev/null)"; then
+    echo "herdr-pi ${sha:0:7} is up: $health"
+    ssh "$host" "curl -fsS http://127.0.0.1:$sql_port/health" | sed 's/^/board: /' || echo "board gateway didn't answer; see: ssh $host docker logs herdr-sql" >&2
+    echo "web page: https://$pi_host:$web_port"
+    exit 0
+  fi
+  sleep 2
+done
+echo "herdr-pi didn't answer on :$port; see: ssh $host docker logs herdr-pi" >&2
+exit 1

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Run on the standby's machine when the Pi is gone: promotes the standby to the board and
+# points every machine at it. README.md, "Board database", has the way back.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+config="$repo/scripts/herdr_config.py"
+self="$(python3 "$config" self)"
+pi_health="https://$(python3 "$config" get pi.host):8097/health"
+new_host="${HERDR_FAILOVER_HOST:-$(python3 "$config" get standby.host):8097}"
+board_config="$HOME/.config/herdr-board/config.json"
+
+if [[ "${1:-}" != "--force" ]] && curl -fsS --max-time 5 "$pi_health" >/dev/null 2>&1; then
+  echo "The Pi's board still answers, so this would split it in two. --force to go ahead anyway." >&2
+  exit 1
+fi
+
+if [[ "$(docker exec herdr-db-standby psql -U herdr -d herdr -tAc 'select pg_is_in_recovery()')" == "t" ]]; then
+  docker exec herdr-db-standby psql -U herdr -d herdr -tAc "select pg_promote()" >/dev/null
+  echo "promoted $self's standby"
+else
+  echo "$self's database was already promoted"
+fi
+
+python3 "$repo/scripts/board_config.py" "$board_config" "$new_host"
+echo "$self: board at $new_host"
+"$HOME/.local/bin/herdr-app" do projects.pull >/dev/null 2>&1 || echo "$self: reload the Herdr window" >&2
+
+for machine in $(python3 "$config" machines); do
+  [[ "$machine" == "$self" ]] && continue
+  target="$(python3 "$config" ssh "$machine")"
+  if ssh -o ConnectTimeout=10 "$target" "python3 - ~/.config/herdr-board/config.json $new_host" < "$repo/scripts/board_config.py"; then
+    echo "$machine: board at $new_host"
+    ssh "$target" '~/.local/bin/herdr-app do projects.pull' >/dev/null 2>&1 || echo "$machine: reload the Herdr window" >&2
+  else
+    echo "$machine unreachable: run scripts/board_config.py there with host $new_host" >&2
+  fi
+done

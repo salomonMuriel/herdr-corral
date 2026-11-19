@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Apply schema/*.sql in order to the board. Every migration is idempotent, so running it
+# again is safe. Needs psql 16+ and board.url in ~/.config/herdr-board/config.json.
+#   scripts/migrate            all migrations
+#   scripts/migrate 0019       from that number on
+set -euo pipefail
+
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+url="${HERDR_BOARD_URL:-$(python3 "$repo/scripts/herdr_config.py" get board.url)}"
+from="${1:-0000}"
+
+for file in "$repo"/schema/*.sql; do
+  name="$(basename "$file")"
+  [[ "$name" < "$from" ]] && continue
+  echo "== $name"
+  psql "$url" -v ON_ERROR_STOP=1 -q -f "$file"
+done

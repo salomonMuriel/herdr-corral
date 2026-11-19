@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1e1f29">
+  <title>Herdr</title>
+  <link rel="stylesheet" href="/static/page.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Herdr</h1>
+    <div id="machines" class="machines"></div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Needs you <span id="need-count" class="count"></span></h2>
+      <div id="needs" class="cards"></div>
+      <p id="needs-empty" class="empty" hidden>Nobody is waiting</p>
+    </section>
+
+    <section class="panel">
+      <h2>Instruct a session</h2>
+      <form id="instruct" class="stack">
+        <select id="instruct-target" required></select>
+        <textarea id="instruct-text" rows="3" placeholder="Message" required></textarea>
+        <div class="row">
+          <button type="submit">Send</button>
+          <span class="result" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Add a task</h2>
+      <form id="add-task" class="stack">
+        <div class="row">
+          <select id="task-project" required></select>
+          <select id="task-subproject"></select>
+        </div>
+        <input id="task-title" placeholder="Title" required maxlength="300">
+        <textarea id="task-notes" rows="3" placeholder="Notes"></textarea>
+        <div class="row">
+          <button type="submit">Add to To do</button>
+          <span class="result" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <template id="card-template">
+    <article class="card">
+      <div class="card-head">
+        <span class="badge"></span>
+        <strong class="title"></strong>
+        <span class="where"></span>
+      </div>
+      <p class="msg"></p>
+      <div class="approval" hidden>
+        <p class="approval-summary"></p>
+        <pre class="approval-detail"></pre>
+        <input class="approval-reason" placeholder="Reason, if you deny" maxlength="2000">
+        <div class="approval-buttons">
+          <button type="button" class="allow">Allow</button>
+          <button type="button" class="always" hidden></button>
+          <button type="button" class="deny danger">Deny</button>
+        </div>
+      </div>
+      <pre class="screen"></pre>
+      <div class="keys">
+        <button data-keys="1">1</button>
+        <button data-keys="2">2</button>
+        <button data-keys="3">3</button>
+        <button data-keys="4">4</button>
+        <button data-keys="up" aria-label="Up">↑</button>
+        <button data-keys="down" aria-label="Down">↓</button>
+        <button data-keys="tab">Tab</button>
+        <button data-keys="shift+tab">⇧Tab</button>
+        <button data-keys="enter">Enter</button>
+        <button data-keys="esc">Esc</button>
+        <button data-keys="ctrl+c" class="danger">Ctrl+C</button>
+      </div>
+      <form class="reply">
+        <textarea rows="2" placeholder="Reply" required></textarea>
+        <button type="submit">Send</button>
+      </form>
+      <div class="card-foot">
+        <span class="result" aria-live="polite"></span>
+        <button type="button" class="force" hidden>Send anyway</button>
+        <button type="button" class="refresh link">Refresh</button>
+      </div>
+    </article>
+  </template>
+
+  <script type="module" src="/static/page.js"></script>
+</body>
+</html>

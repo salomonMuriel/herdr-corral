@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+"""hb: an agent reports to its task on the Herdr board.
+
+  hb done "<summary>"        finished: the card moves to Review with the summary,
+                             or to Done when the task needs no review; with code
+                             review on, a code review of the branch runs first
+  hb ask "<question>"        you need the person: the card shows the question
+  hb note "<progress>"       progress for the card
+  hb add "<title>" [notes]   a new To do task in the same project and repo
+  hb show                    the task this terminal works on
+
+The task is the one whose tab is this terminal's Herdr tab, in the task's own repo
+or one of its other repos. From another repo, ask and note name that repo on the
+card, and done saves the summary as a note unless no agent works in the task's
+own repo, when it finishes the task as usual.
+
+A project's coordinator has its own commands, listed below.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import random
+import shutil
+import socket
+import string
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Optional
+
+import hb_coordinator
+
+LOCAL_BIN = Path.home() / ".local/bin"
+CONFIG_PATH = Path(os.environ.get("HERDR_BOARD_CONFIG", Path.home() / ".config/herdr-board/config.json"))
+REPORT_KINDS = ("done", "ask", "note")
+MAX_REVIEW_ROUNDS = 3
+STATUS_LABEL = {"todo": "To do", "doing": "In progress", "review": "Review", "done": "Done"}
+
+
+def fail(message: str) -> None:
+    print(f"hb: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def tool(name: str) -> Optional[str]:
+    found = shutil.which(name)
+    if found:
+        return found
+    fallback = LOCAL_BIN / name
+    return str(fallback) if fallback.exists() else None
+
+
+def load_config() -> dict[str, Any]:
+    try:
+        return json.loads(CONFIG_PATH.read_text())
+    except (OSError, ValueError) as error:
+        fail(f"can't read the board config at {CONFIG_PATH}: {error}")
+    return {}
+
+
+def post(body: dict[str, Any]) -> dict[str, Any]:
+    config = load_config()
+    board = config["board"]
+    request = urllib.request.Request(
+        f"https://{board['host']}/sql",
+        data=json.dumps(body).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "Neon-Connection-String": board["url"],
+            "Neon-Batch-Isolation-Level": "ReadCommitted",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        try:
+            detail = json.loads(detail).get("message", detail)
+        except ValueError:
+            pass
+        fail(f"the board refused: {detail}")
+    except urllib.error.URLError as error:
+        fail(f"can't reach the board: {error.reason}")
+    return {}
+
+
+def sql(query: str, params: list[Any]) -> list[dict[str, Any]]:
+    return post({"query": query, "params": params}).get("rows", [])
+
+
+def machine_name() -> str:
+    host = socket.gethostname()
+    names = load_config().get("machines") or {}
+    return names.get(host) or names.get(host.split(".")[0]) or host.split(".")[0]
+
+
+# The same transaction tells task_events (schema/0013) who on this machine wrote it.
+def write_all(queries: list[tuple[str, list[Any]]], actor: str = "agent") -> list[dict[str, Any]]:
+    tag = {
+        "query": "select set_config('herdr.actor', $1, true), set_config('herdr.machine', $2, true)",
+        "params": [actor, machine_name()],
+    }
+    body = [tag, *({"query": query, "params": params} for query, params in queries)]
+    results = post({"queries": body}).get("results", [])
+    return results[-1]["rows"] if results else []
+
+
+def write(query: str, params: list[Any]) -> list[dict[str, Any]]:
+    return write_all([(query, params)])
+
+
+def terminal_info(hc: str, terminal: str) -> dict[str, Any]:
+    result = subprocess.run([hc, "get", terminal, "--json"], capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        fail(f"hc get {terminal} failed: {result.stderr.strip()}")
+    return json.loads(result.stdout)
+
+
+# Helpers started with hc run have no labels of their own, so this walks up to the parent's.
+def labelled_terminal() -> tuple[str, dict[str, str]]:
+    hc = tool("hc")
+    terminal = os.environ.get("HC_TERMINAL_ID")
+    if not hc or not terminal:
+        fail("not running in a Herdr terminal")
+    seen: set[str] = set()
+    while terminal and terminal not in seen:
+        seen.add(terminal)
+        info = terminal_info(hc, terminal)
+        labels = info.get("labels") or {}
+        if "herdr.tab" in labels:
+            return terminal, labels
+        terminal = info.get("parent")
+    fail("this terminal isn't in a Herdr tab")
+    return "", {}
+
+
+TASK_COLUMNS = (
+    "t.id, t.project_id, t.subproject_id, t.title, t.status, t.tab, t.needs_review, t.review_waived,"
+    " t.waiver_quote, t.code_review, t.code_review_state, t.code_review_round, t.code_review_open,"
+    " p.review_mode, p.code_review as project_code_review"
+)
+
+
+# Stored tabs carry a machine prefix ("laptop/tb12"); tab ids are unique on their own.
+def current_task(labels: dict[str, str]) -> dict[str, Any]:
+    tab = labels.get("herdr.tab")
+    if not tab:
+        fail("this terminal isn't in a Herdr tab")
+    rows = sql(
+        f"select {TASK_COLUMNS} from tasks t join projects p on p.id = t.project_id"
+        " where split_part(t.tab, '/', 2) = $1 or t.tab = $1 order by t.updated_at desc limit 1",
+        [tab],
+    )
+    if rows:
+        return rows[0]
+    parts = sql(
+        f"select {TASK_COLUMNS}, r.subproject_id as part_subproject_id, s.name as part_repo,"
+        " (select name from subprojects where id = t.subproject_id) as lead_repo"
+        " from task_repos r join tasks t on t.id = r.task_id join projects p on p.id = t.project_id"
+        " join subprojects s on s.id = r.subproject_id"
+        " where split_part(r.tab, '/', 2) = $1 or r.tab = $1 order by r.updated_at desc limit 1",
+        [tab],
+    )
+    if not parts:
+        fail("no task on the board is linked to this tab")
+    return parts[0]
+
+
+def is_other_repo(task: dict[str, Any]) -> bool:
+    return bool(task.get("part_subproject_id"))
+
+
+# Mirrors needsReview in mods/projects/review.js.
+def needs_review(task: dict[str, Any]) -> bool:
+    if task.get("review_waived"):
+        return False
+    if task.get("needs_review") is not None:
+        return bool(task["needs_review"])
+    return task.get("review_mode") != "free"
+
+
+# Mirrors codeReviewOn in mods/projects/review.js.
+def code_review_on(task: dict[str, Any]) -> bool:
+    if task.get("code_review") is not None:
+        return bool(task["code_review"])
+    return bool(task.get("project_code_review"))
+
+
+def review_label(task: dict[str, Any]) -> str:
+    if task.get("review_waived"):
+        return f'review waived ("{task.get("waiver_quote") or ""}")'
+    return "needs review" if needs_review(task) else "no review"
+
+
+def new_id() -> str:
+    millis = int(time.time() * 1000)
+    digits = string.digits + string.ascii_lowercase
+    stamp = ""
+    while millis:
+        millis, rest = divmod(millis, 36)
+        stamp = digits[rest] + stamp
+    return stamp + "".join(random.choice(digits) for _ in range(6))
+
+
+# The window pulls and tells the other machines; with no window open they catch up when theirs comes forward.
+def nudge_window() -> None:
+    herdr_app = tool("herdr-app")
+    if not herdr_app:
+        return
+    try:
+        subprocess.run([herdr_app, "do", "projects.wrote"], capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return
+
+
+def finish(task: dict[str, Any], text: str) -> None:
+    write(
+        "update tasks set status = 'done', done_at = now(), report = $2, report_kind = 'done',"
+        " reported_at = now(), updated_at = now() where id = $1",
+        [task["id"], text],
+    )
+    print(f"{task['title']}: moved to Done ({review_label(task)})")
+
+
+# A review already under way keeps going; one that failed for good starts over at round 1.
+def queue_code_review(task: dict[str, Any], text: str) -> None:
+    state = task.get("code_review_state")
+    if state in ("queued", "running"):
+        write("update tasks set report = $2, report_kind = 'done', reported_at = now(), updated_at = now() where id = $1", [task["id"], text])
+        print(f"{task['title']}: code review already under way; its findings come to you as a message")
+        return
+    restart = state in (None, "failed", "passed")
+    write(
+        "update tasks set status = 'doing', done_at = null, report = $2, report_kind = 'done', reported_at = now(),"
+        " updated_at = now(), code_review_state = 'queued', code_review_at = now(),"
+        " code_review_round = case when $3::boolean then 0 else code_review_round end where id = $1",
+        [task["id"], text, restart],
+    )
+    round_number = 1 if restart else int(task.get("code_review_round") or 0) + 1
+    print(f"{task['title']}: code review queued (round {round_number} of {MAX_REVIEW_ROUNDS}). "
+          "Stop here: its findings, or the next step, come to you as a message.")
+
+
+# After a pass with no review from the person, the agent merges and its next hb done
+# finishes the task. With the person's review, an hb done after a pass is work sent back.
+def wants_code_review(task: dict[str, Any]) -> bool:
+    if not code_review_on(task):
+        return False
+    return task.get("code_review_state") != "passed" or needs_review(task)
+
+
+def report(task: dict[str, Any], kind: str, text: str) -> None:
+    if kind == "done" and wants_code_review(task):
+        queue_code_review(task, text)
+        return
+    if kind == "done" and not needs_review(task):
+        finish(task, text)
+        return
+    if kind == "done":
+        write(
+            "update tasks set status = 'review', done_at = null, report = $2, report_kind = 'done',"
+            " reported_at = now(), updated_at = now(),"
+            " position = (select coalesce(max(r.position), -1) + 1 from tasks r"
+            "   where r.project_id = tasks.project_id and r.status = 'review' and r.id <> tasks.id)"
+            " where id = $1",
+            [task["id"], text],
+        )
+        print(f"{task['title']}: moved to Review")
+        return
+    write(
+        "update tasks set report = $2, report_kind = $3, reported_at = now(), updated_at = now() where id = $1",
+        [task["id"], text, kind],
+    )
+    print(f"{task['title']}: {'question' if kind == 'ask' else 'note'} saved")
+
+
+# An agent in another repo of the task reports its part; the card moves with the task's own repo.
+def report_part(task: dict[str, Any], kind: str, text: str) -> None:
+    labelled = f"{task['part_repo']}: {text}"
+    if kind == "done" and not task.get("tab"):
+        report(task, kind, labelled)
+        return
+    if kind == "done":
+        write("update tasks set report = $2, report_kind = 'note', reported_at = now(), updated_at = now() where id = $1",
+              [task["id"], f"{task['part_repo']} done: {text}"])
+        print(f"{task['title']}: {task['part_repo']} part reported; the card moves when the {task['lead_repo']} agent finishes")
+        return
+    report(task, kind, labelled)
+
+
+def add(task: dict[str, Any], title: str, notes: str) -> None:
+    task_id = new_id()
+    write(
+        "insert into tasks (id, project_id, subproject_id, title, notes, status, position)"
+        " values ($1, $2, $3, $4, $5, 'todo',"
+        "   (select coalesce(min(position), 1) - 1 from tasks where project_id = $2 and status = 'todo'))",
+        [task_id, task["project_id"], task.get("part_subproject_id") or task["subproject_id"], title, notes],
+    )
+    print(f"Added {title} ({task_id}) to To do")
+
+
+def code_review_label(task: dict[str, Any]) -> str:
+    if not code_review_on(task):
+        return "no code review"
+    state = task.get("code_review_state")
+    if not state:
+        return "code review on"
+    return f"code review {state} (round {task.get('code_review_round') or 0} of {MAX_REVIEW_ROUNDS})"
+
+
+def show(task: dict[str, Any]) -> None:
+    status = STATUS_LABEL.get(task["status"], task["status"])
+    part = f", {task['part_repo']} part (the task's own repo is {task['lead_repo']})" if is_other_repo(task) else ""
+    print(f"{task['title']} ({task['id']}): {status}, {review_label(task)}, {code_review_label(task)}{part}")
+
+
+# A coordinator's tab is in the coordinators table, not on a task.
+def run_as_coordinator(terminal: str, tab: str, command: str, args: list[str]) -> bool:
+    board = hb_coordinator.Board(sql=sql, write=write_all, fail=fail, tool=tool, machine=machine_name(),
+                                 new_id=new_id, nudge=nudge_window, hosts=load_config().get("hosts") or {})
+    coordinator = hb_coordinator.find(board, tab)
+    if not coordinator:
+        return False
+    hb_coordinator.run(board, coordinator, terminal, command, args)
+    return True
+
+
+def main(argv: list[str]) -> None:
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        print(f"\n{hb_coordinator.USAGE}")
+        return
+    command, args = argv[0], argv[1:]
+    terminal, labels = labelled_terminal()
+    if labels.get("herdr.tab") and run_as_coordinator(terminal, labels["herdr.tab"], command, args):
+        return
+    if command == "show":
+        show(current_task(labels))
+        return
+    if command == "add":
+        if not args or not args[0].strip():
+            fail('usage: hb add "<title>" [notes]')
+        title, notes = args[0].strip(), " ".join(args[1:]).strip()
+        add(current_task(labels), title, notes)
+        nudge_window()
+        return
+    if command not in REPORT_KINDS:
+        fail(f"unknown command {command}; hb --help lists them")
+    text = " ".join(args).strip()
+    if not text:
+        fail(f'usage: hb {command} "<text>"')
+    task = current_task(labels)
+    if is_other_repo(task):
+        report_part(task, command, text)
+    else:
+        report(task, command, text)
+    nudge_window()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

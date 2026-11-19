@@ -1,0 +1,31 @@
+# Copy to ~/.config/herdr-board/pi.toml on the machine you deploy from; scripts/deploy-pi
+# builds it into the image. Every field without a value here has a default in config.py.
+
+# Tailscale logins the web page answers; everyone else on the tailnet gets 403.
+web_logins = ["you@example.com"]
+
+# Machines the service follows. `ssh` is the destination as the Pi reaches it over the
+# tailnet (Tailscale SSH, so no keys to manage); `hc` is spelled out because non-interactive
+# ssh shells don't have ~/.local/bin.
+
+[[machines]]
+name = "desk"
+ssh = "you@desk"
+# Where the nightly board dump lands on this machine; point it at a folder you back up.
+backup_dir = "~/.local/share/herdr-board"
+
+[[machines]]
+name = "laptop"
+ssh = "you@laptop"
+
+# The end-of-day digest: written for the Today view and pushed at `at` (Pi local time).
+# recaps adds each agent's reports of the day.
+[digest]
+at = 19:00:00
+recaps = true
+url = "https://pi.your-tailnet.ts.net:8096/"
+
+# Phone alerts through the herdr-ntfy container.
+[alerts]
+topic = "herdr"
+agent_url = "https://pi.your-tailnet.ts.net:8096/agents/{machine}/{address}"

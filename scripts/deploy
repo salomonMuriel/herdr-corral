@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# Copy this checkout's main into ~/.config/herdr-app on every machine in the config, check the mod on
+# each, stamp it with mods/projects/VERSION and record the deploy on the board.
+# --local: this machine only, and nothing recorded (how a window catches up by itself).
+set -euo pipefail
+
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+config="$repo/scripts/herdr_config.py"
+read -r -a machines <<<"$(python3 "$config" machines | tr "\n" " ")"
+mod_excludes=(--exclude cache/ --exclude '*.d.ts' --exclude jsconfig.json --exclude VERSION)
+local_only=false
+[[ "${1:-}" == "--local" ]] && local_only=true
+
+ssh_target() { python3 "$config" ssh "$1"; }
+platform_of() { python3 "$config" platform "$1"; }
+
+self="$(python3 "$config" self)"
+
+# Runs a shell command on the machine; $HOME in single quotes expands there.
+run_on() {
+  local machine="$1" command="$2"
+  if [[ "$machine" == "$self" ]]; then
+    bash -c "$command"
+    return
+  fi
+  ssh "$(ssh_target "$machine")" "$command"
+}
+
+# A folder under the machine's home, as rsync addresses it.
+home_path() {
+  local machine="$1" path="$2"
+  if [[ "$machine" == "$self" ]]; then
+    echo "$HOME/$path"
+    return
+  fi
+  echo "$(ssh_target "$machine"):$path"
+}
+
+copy_files() {
+  local machine="$1" dest
+  dest="$(home_path "$machine" .config/herdr-app)"
+  run_on "$machine" 'mkdir -p "$HOME/.config/herdr-app/mods/projects" "$HOME/.config/herdr-app/layouts" "$HOME/.config/herdr-app/themes" "$HOME/.local/bin"'
+  rsync -a --delete "${mod_excludes[@]}" "$repo/mods/projects/" "$dest/mods/projects/"
+  rsync -a "$repo/layouts/projects-dracula.json" "$dest/layouts/"
+  rsync -a "$repo/themes/dracula.json" "$dest/themes/"
+  rsync -a "$repo/PRODUCT.md" "$dest/"
+  rsync -a "$repo/bin/hb" "$repo/bin/hb_coordinator.py" "$repo/bin/herdr-ask" "$repo/bin/herdr-presence" "$repo/bin/herdr-approve" "$(home_path "$machine" .local/bin)/"
+}
+
+merge_keys() {
+  local machine="$1" current merged
+  current="$(run_on "$machine" 'cat "$HOME/.config/herdr-app/keys.json" 2>/dev/null || echo "{}"')"
+  merged="$(python3 "$repo/scripts/merge_keys.py" "$repo/keys/projects-dracula.json" "$(platform_of "$machine")" <<<"$current")"
+  [[ "$merged" == "$current" ]] && return
+  printf '%s' "$merged" | run_on "$machine" \
+    'cat > "$HOME/.config/herdr-app/keys.json.tmp" && mv "$HOME/.config/herdr-app/keys.json.tmp" "$HOME/.config/herdr-app/keys.json"'
+  echo "$machine: keys.json updated"
+}
+
+# Adds the herdr-ask and herdr-approve hooks to Claude Code's settings, next to whatever hooks are there.
+merge_hooks() {
+  local machine="$1" current merged
+  current="$(run_on "$machine" 'cat "$HOME/.claude/settings.json" 2>/dev/null || true')"
+  merged="$(python3 "$repo/scripts/merge_hooks.py" <<<"$current")"
+  [[ "$merged" == "$current" ]] && return
+  printf '%s\n' "$merged" | run_on "$machine" \
+    'mkdir -p "$HOME/.claude" && cat > "$HOME/.claude/settings.json.tmp" && mv "$HOME/.claude/settings.json.tmp" "$HOME/.claude/settings.json"'
+  echo "$machine: Claude Code hooks updated"
+}
+
+check_mod() {
+  run_on "$1" '"$HOME/.local/bin/herdr-app" check "$HOME/.config/herdr-app/mods/projects"'
+}
+
+reachable() {
+  [[ "$1" == "$self" ]] && return
+  ssh -o ConnectTimeout=5 -o BatchMode=yes "$(ssh_target "$1")" true 2>/dev/null
+}
+
+# Only a pushed main gets deployed, so a machine that missed it can pull the same commit.
+require_pushed_main() {
+  local branch
+  branch="$(git -C "$repo" symbolic-ref --quiet --short HEAD || true)"
+  [[ "$branch" == main ]] || { echo "Deploy from main, not ${branch:-a detached HEAD}" >&2; exit 1; }
+  [[ -z "$(git -C "$repo" status --porcelain)" ]] || { echo "Commit or stash your changes first" >&2; exit 1; }
+  git -C "$repo" fetch --quiet origin main
+  [[ "$(git -C "$repo" rev-parse HEAD)" == "$(git -C "$repo" rev-parse origin/main)" ]] \
+    || { echo "main differs from origin/main: pull or push first" >&2; exit 1; }
+}
+
+write_version() {
+  local machine="$1"
+  printf '{"sha":"%s","at":"%s","by":"%s"}\n' "$sha" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$self" \
+    | run_on "$machine" 'cat > "$HOME/.config/herdr-app/mods/projects/VERSION"'
+}
+
+# The mod runs scripts from each machine's clone (handoff, task-cleanup, nightly-cleanup),
+# so the other machine's clone has to reach the deployed commit too.
+sync_clone() {
+  local machine="$1" head
+  [[ "$machine" == "$self" ]] && return
+  head="$(run_on "$machine" 'cd "$HOME/git/herdr-projects" && [ "$(git symbolic-ref --quiet --short HEAD)" = main ] && git pull --ff-only --quiet origin main && git rev-parse HEAD' 2>&1)" || true
+  [[ "$head" == "$sha" ]] && return
+  echo "$machine: ~/git/herdr-projects isn't at ${sha:0:7}, so its scripts are stale: ${head##*$'\n'}" >&2
+  stale_clones+=("$machine")
+}
+
+if $local_only; then
+  machines=("$self")
+else
+  require_pushed_main
+fi
+sha="$(git -C "$repo" rev-parse HEAD)"
+
+targets=()
+for machine in "${machines[@]}"; do
+  if ! reachable "$machine"; then
+    echo "== $machine: unreachable, it catches up when its window opens" >&2
+    continue
+  fi
+  echo "== $machine"
+  copy_files "$machine"
+  merge_keys "$machine"
+  merge_hooks "$machine"
+  targets+=("$machine")
+done
+
+failed=()
+deployed=()
+stale_clones=()
+for machine in ${targets[@]+"${targets[@]}"}; do
+  printf '%s: ' "$machine"
+  if check_mod "$machine"; then
+    write_version "$machine"
+    sync_clone "$machine"
+    deployed+=("$machine")
+  else
+    failed+=("$machine")
+  fi
+done
+
+if ! $local_only && (( ${#deployed[@]} )); then
+  python3 "$repo/scripts/record_deploy.py" "$sha" "$self"
+  echo "Recorded main ${sha:0:7}"
+fi
+
+if (( ${#failed[@]} )); then
+  echo "Check failed on: ${failed[*]}" >&2
+  exit 1
+fi
+(( ${#stale_clones[@]} )) && echo "Pull ~/git/herdr-projects by hand on: ${stale_clones[*]}" >&2
+(( ${#targets[@]} )) || { echo "No machine reached" >&2; exit 1; }

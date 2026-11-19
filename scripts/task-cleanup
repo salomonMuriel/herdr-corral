@@ -1,0 +1,76 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pydantic>=2"]
+# ///
+"""Clean up after a Done task: remove its worktree and branch, and a Neon branch named after
+it, when scripts/cleanup's rules call them safe. Writes what happened to the task's card.
+
+The board runs this on the task's machine once the branch is on main and the task's session
+is closed. --check prints the verdict and changes nothing.
+"""
+import argparse
+import json
+import subprocess
+import sys
+import urllib.error
+from pathlib import Path
+
+from cleanup_lib import board
+from cleanup_lib.task import Outcome, clean, judge
+
+HERDR_APP = Path.home() / ".local/bin/herdr-app"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--task", required=True, help="the task's id on the board")
+    parser.add_argument("--subproject", help="one of the task's other repos (task_repos), when the worktree is there")
+    parser.add_argument("--repo", required=True, help="the repo's main checkout")
+    parser.add_argument("--path", required=True, help="the task's worktree")
+    parser.add_argument("--branch", required=True, help="the task's git branch")
+    parser.add_argument("--check", action="store_true", help="print the verdict, change nothing")
+    return parser.parse_args()
+
+
+def check(args: argparse.Namespace) -> None:
+    verdict = judge(args.repo, args.path, args.branch)
+    if verdict is None:
+        print("nothing left: no worktree and no branch")
+        return
+    print(f"{'safe' if verdict.safe else 'keep'}: {verdict.reason}")
+
+
+def outcome_for(args: argparse.Namespace) -> Outcome:
+    try:
+        return clean(args.repo, args.path, args.branch)
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
+        return Outcome(kind="kept", text=f"Worktree kept: cleanup failed: {error}")
+
+
+# The window pulls and tells the other machines, so the card updates everywhere.
+def nudge_window() -> None:
+    if not HERDR_APP.exists():
+        return
+    try:
+        subprocess.run([str(HERDR_APP), "do", "projects.wrote"], capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f"warning: couldn't ask the window to pull: {error}", file=sys.stderr)
+
+
+def main() -> None:
+    args = parse_args()
+    if args.check:
+        check(args)
+        return
+    outcome = outcome_for(args)
+    print(json.dumps(outcome.model_dump()))
+    try:
+        board.record_cleanup(args.task, outcome.kind, outcome.text, args.subproject)
+    except (OSError, ValueError, KeyError, urllib.error.URLError) as error:
+        sys.exit(f"couldn't write to the board: {error}")
+    nudge_window()
+
+
+if __name__ == "__main__":
+    main()

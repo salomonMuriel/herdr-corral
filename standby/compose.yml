@@ -1,0 +1,39 @@
+# The board's optional standby on one of your machines, set up by scripts/deploy-standby. It streams from
+# herdr-db on the Pi; scripts/board-failover promotes it when the Pi is gone.
+services:
+  herdr-db-standby:
+    image: postgres:18
+    container_name: herdr-db-standby
+    restart: unless-stopped
+    mem_limit: 256m
+    # Host networking so it reaches the Pi by its tailnet name.
+    network_mode: host
+    env_file: ./data/db.env
+    environment:
+      POSTGRES_USER: herdr
+      POSTGRES_DB: herdr
+      # The server and `docker exec … psql` both default to PGPORT.
+      PGPORT: "5440"
+    # The Pi's settings, so a promoted standby can serve a rebuilt Pi in turn.
+    command: >-
+      postgres -c listen_addresses=127.0.0.1 -c timezone=UTC
+      -c shared_buffers=32MB -c wal_level=replica -c max_slot_wal_keep_size=2GB
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+
+  # Read-only while the database is a standby; writes work once it's promoted.
+  herdr-sql:
+    build: ../pi
+    image: herdr-standby/sql:local
+    container_name: herdr-sql
+    restart: unless-stopped
+    mem_limit: 128m
+    network_mode: host
+    env_file: ./data/db.env
+    command: ["python", "-m", "herdr_pi.sql_gateway"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8097/health', timeout=4)"]
+      interval: 60s
+      timeout: 5s
+    depends_on:
+      - herdr-db-standby

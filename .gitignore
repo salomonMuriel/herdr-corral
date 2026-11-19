@@ -1,0 +1,15 @@
+node_modules/
+.DS_Store
+*.d.ts
+jsconfig.json
+mods/projects/cache/
+.env
+mods/projects/VERSION
+.claude/worktrees/
+__pycache__/
+.venv/
+.pytest_cache/
+pi/config.toml
+config.json
+*.toml.local
+data/

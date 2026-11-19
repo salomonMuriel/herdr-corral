@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""herdr-approve: a Claude Code PermissionRequest hook that lets the Pi's page answer the prompt.
+
+  herdr-approve [seconds]   reads the hook's JSON on stdin, posts the request to herdr-pi and
+                            waits up to `seconds` (default 900) for Allow, Always allow or Deny
+
+Claude Code shows its own prompt while the hook waits, and whichever answer comes first wins.
+With no answer from the page, or no Pi, the hook prints nothing and the prompt stays.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import signal
+import socket
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, NoReturn, Optional
+
+CONFIG_PATH = Path(os.environ.get("HERDR_BOARD_CONFIG", Path.home() / ".config/herdr-board/config.json"))
+DEFAULT_WAIT_SECONDS = 900.0
+POLL_SECONDS = 25
+RETRY_SECONDS = 3.0
+LOG = Path.home() / ".cache/herdr-projects/approve.log"
+# Questions need answers, and a plan approval also picks a mode; the page's keys handle both.
+SKIPPED_TOOLS = {"AskUserQuestion", "ExitPlanMode"}
+DETAIL_LIMIT = 6000
+SUMMARY_LIMIT = 300
+
+
+def log(message: str) -> None:
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a") as file:
+            file.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+    except OSError:
+        pass
+
+
+def load_config() -> dict[str, Any]:
+    try:
+        return json.loads(CONFIG_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def pi_url() -> str | None:
+    if os.environ.get("HERDR_PI_URL"):
+        return os.environ["HERDR_PI_URL"].rstrip("/")
+    host = (load_config().get("pi") or {}).get("host")
+    return f"https://{host}:8096" if host else None
+
+
+def machine_name() -> str:
+    if os.environ.get("HERDR_MACHINE"):
+        return os.environ["HERDR_MACHINE"]
+    host = socket.gethostname()
+    names = load_config().get("machines") or {}
+    return names.get(host) or names.get(host.split(".")[0]) or host.split(".")[0]
+
+
+def clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def describe(tool: str, tool_input: dict[str, Any]) -> tuple[str, str]:
+    """A one-line summary and a longer detail for the page."""
+    if tool == "Bash":
+        return tool_input.get("description", ""), tool_input.get("command", "")
+    if tool == "Edit":
+        detail = f"- {tool_input.get('old_string', '')}\n+ {tool_input.get('new_string', '')}"
+        return tool_input.get("file_path", ""), detail
+    if tool == "Write":
+        return tool_input.get("file_path", ""), tool_input.get("content", "")
+    if tool in ("WebFetch", "WebSearch"):
+        return tool_input.get("url") or tool_input.get("query", ""), tool_input.get("prompt", "")
+    path = tool_input.get("file_path") or tool_input.get("path") or tool_input.get("notebook_path") or ""
+    return path, json.dumps(tool_input, indent=2, ensure_ascii=False)
+
+
+def rule_label(rule: dict[str, Any]) -> str:
+    content = rule.get("ruleContent")
+    return f"{rule.get('toolName', '')}({content})" if content else rule.get("toolName", "")
+
+
+def suggestion_label(suggestion: dict[str, Any]) -> str:
+    kind = suggestion.get("type")
+    if kind in ("addRules", "replaceRules"):
+        return ", ".join(rule_label(rule) for rule in suggestion.get("rules", []))
+    if kind == "addDirectories":
+        return "access to " + ", ".join(suggestion.get("directories", []))
+    if kind == "setMode":
+        return f"mode {suggestion.get('mode', '')}"
+    return ""
+
+
+def always_label(suggestions: list[dict[str, Any]]) -> Optional[str]:
+    labels = [label for label in (suggestion_label(s) for s in suggestions) if label]
+    return clip("; ".join(labels), 400) if labels else None
+
+
+def call(method: str, path: str, body: Optional[dict[str, Any]] = None, timeout: float = 10) -> dict[str, Any]:
+    data = json.dumps(body).encode() if body is not None else None
+    headers = {"Content-Type": "application/json"} if data is not None else {}
+    request = urllib.request.Request(str(pi_url()) + path, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read())
+
+
+def withdraw(approval_id: str) -> None:
+    try:
+        call("POST", f"/api/approvals/{approval_id}/withdraw", {}, timeout=5)
+    except (OSError, ValueError) as error:
+        log(f"withdraw {approval_id} failed: {error}")
+
+
+def decide(behavior: str, **fields: Any) -> NoReturn:
+    output = {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": behavior, **fields}}}
+    print(json.dumps(output))
+    sys.exit(0)
+
+
+def wait_for_answer(approval_id: str, deadline: float) -> Optional[dict[str, Any]]:
+    while time.monotonic() < deadline:
+        wait = max(1, min(POLL_SECONDS, int(deadline - time.monotonic())))
+        try:
+            approval = call("GET", f"/api/approvals/{approval_id}?wait={wait}", timeout=wait + 15)
+        except urllib.error.HTTPError as error:
+            log(f"{approval_id}: the Pi answered {error.code}, giving up")
+            return None
+        except (OSError, ValueError) as error:
+            log(f"{approval_id}: poll failed: {error}")
+            time.sleep(RETRY_SECONDS)
+            continue
+        if approval.get("state") != "pending":
+            return approval
+    return None
+
+
+def build_request(hook: dict[str, Any], terminal: str, seconds: float) -> dict[str, Any]:
+    tool = hook["tool_name"]
+    summary, detail = describe(tool, hook.get("tool_input") or {})
+    return {
+        "machine": machine_name(),
+        "address": terminal,
+        "tool": tool,
+        "summary": clip(str(summary), SUMMARY_LIMIT),
+        "detail": clip(str(detail), DETAIL_LIMIT),
+        "cwd": hook.get("cwd", ""),
+        "always_label": always_label(hook.get("permission_suggestions") or []),
+        "wait_seconds": seconds,
+    }
+
+
+def apply_answer(answer: dict[str, Any], suggestions: list[dict[str, Any]]) -> None:
+    state = answer.get("state")
+    if state == "allow":
+        decide("allow")
+    if state == "always" and suggestions:
+        decide("allow", updatedPermissions=suggestions)
+    if state == "always":
+        decide("allow")
+    if state == "deny":
+        decide("deny", message=answer.get("message") or "Denied from the phone.")
+
+
+def main(argv: list[str]) -> None:
+    terminal = os.environ.get("HC_TERMINAL_ID")
+    if not terminal:
+        return
+    try:
+        hook = json.loads(sys.stdin.read() or "{}")
+    except ValueError as error:
+        log(f"bad hook input: {error}")
+        return
+    if not hook.get("tool_name") or hook["tool_name"] in SKIPPED_TOOLS:
+        return
+    if not pi_url():
+        return
+    seconds = float(argv[0]) if argv else DEFAULT_WAIT_SECONDS
+    try:
+        approval_id = call("POST", "/api/approvals", build_request(hook, terminal, seconds))["id"]
+    except (OSError, ValueError, KeyError) as error:
+        log(f"{hook['tool_name']} on {terminal}: couldn't reach the Pi: {error}")
+        return
+
+    def stop(*_: object) -> None:
+        withdraw(approval_id)
+        sys.exit(0)
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, stop)
+
+    answer = wait_for_answer(approval_id, time.monotonic() + seconds)
+    if answer is None:
+        withdraw(approval_id)
+        return
+    apply_answer(answer, hook.get("permission_suggestions") or [])
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

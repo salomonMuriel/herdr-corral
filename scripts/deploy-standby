@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Build and start the board's standby on this machine from origin/main's pi/ and standby/
+# folders. The first run copies the Pi's database with pg_basebackup. Optional: the board
+# works without one.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+config="$repo/scripts/herdr_config.py"
+pi="${HERDR_PI_SSH:-$(python3 "$config" get pi.ssh)}"
+primary="${HERDR_DB_PRIMARY:-$(python3 "$config" get pi.host)}"
+pi_dir="$(python3 "$config" get pi.dir herdr-pi)"
+dest="${HERDR_STANDBY_DIR:-$(python3 "$config" get standby.dir "$HOME/herdr-standby")}"
+data="$dest/standby/data"
+db_port=5440
+sql_port=8097
+slot="$(python3 "$config" self | tr "A-Z" "a-z" | tr -c "a-z0-9_\n" _)"
+
+git -C "$repo" fetch --quiet origin main
+sha="$(git -C "$repo" rev-parse origin/main)"
+
+build="$(mktemp -d)"
+trap 'rm -rf "$build"' EXIT
+git -C "$repo" archive origin/main pi standby | tar -x -C "$build"
+printf '%s %s %s\n' "${sha:0:7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname -s)" > "$build/pi/VERSION"
+
+mkdir -p "$dest"
+rsync -a --delete --exclude data/ "$build/pi/" "$dest/pi/"
+rsync -a --delete --exclude data/ "$build/standby/" "$dest/standby/"
+mkdir -p "$data/postgres"
+
+# Same passwords as the Pi, so clients keep their connection string when they fail over.
+if ssh "$pi" "cat ~/$pi_dir/data/db.env" > "$build/db.env" 2>/dev/null; then
+  (umask 077 && cp "$build/db.env" "$data/db.env")
+elif [[ ! -f "$data/db.env" ]]; then
+  echo "Couldn't read the Pi's data/db.env; run scripts/deploy-pi first." >&2
+  exit 1
+fi
+set -a
+# shellcheck source=/dev/null
+source "$data/db.env"
+set +a
+
+# The data folder belongs to the container's postgres user, so look from inside one.
+if ! docker run --rm -v "$data/postgres:/var/lib/postgresql:ro" postgres:18 \
+    test -f /var/lib/postgresql/18/docker/PG_VERSION; then
+  existing="$(docker run --rm --network host -e PGPASSWORD="$POSTGRES_PASSWORD" postgres:18 \
+    psql -h "$primary" -p "$db_port" -U herdr -d herdr -tAc \
+    "select count(*) from pg_replication_slots where slot_name = '$slot'")"
+  create_slot=(-C)
+  [[ "$existing" == "1" ]] && create_slot=()
+  echo "Copying the board from $primary..."
+  docker run --rm --network host -e PGPASSWORD="$REPLICATOR_PASSWORD" \
+    -v "$data/postgres:/var/lib/postgresql" postgres:18 bash -c \
+    "pg_basebackup -h $primary -p $db_port -U replicator -D /var/lib/postgresql/18/docker -R -X stream -S $slot ${create_slot[*]} \
+     && chown -R postgres:postgres /var/lib/postgresql/18"
+fi
+
+docker compose -f "$dest/standby/compose.yml" up -d --build
+# Tailnet only, never funnel. Clients reach it here after scripts/board-failover.
+tailscale serve --bg --https=$sql_port http://127.0.0.1:$sql_port >/dev/null
+
+for _ in $(seq 30); do
+  if health="$(curl -fsS http://127.0.0.1:$sql_port/health 2>/dev/null)"; then
+    echo "standby ${sha:0:7} is up: $health"
+    exit 0
+  fi
+  sleep 2
+done
+echo "the standby's gateway didn't answer on :$sql_port; see: docker logs herdr-sql" >&2
+exit 1

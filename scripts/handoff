@@ -1,0 +1,75 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+"""Move a running session to the other machine.
+
+  scripts/handoff <terminal> <machine> [--summary] [--keep-source] [--repo <path>]
+
+Claude Code moves with its conversation: it is stopped at a turn boundary, its transcript is
+copied to the target and resumed there with `claude --resume`. Any other agent (or Claude with
+--summary) writes a handoff summary to its card and a fresh agent starts from it. Either way the
+worktree's uncommitted work is committed to handoff/<name>, carried in a git bundle and checked
+out on the target as the same branch, the card points at the new tab and the old tab closes.
+
+Run it on a machine with a Herdr window; the window opens the new tab. --repo is the repo's main
+checkout on the target when it isn't at the same place under the home folder.
+"""
+import argparse
+import fcntl
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from handoff_lib import board, terminal  # noqa: E402
+from handoff_lib.machines import HandoffError, known_machines, label  # noqa: E402
+from handoff_lib.move import move, say  # noqa: E402
+
+LOCK_DIR = Path.home() / ".cache/herdr-projects"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Move a running session to the other machine.")
+    parser.add_argument("terminal", help="its hc address, like t7 or laptop/t7")
+    parser.add_argument("machine", help="where it should run")
+    parser.add_argument("--summary", action="store_true", help="a fresh agent from a handoff summary, even for Claude Code")
+    parser.add_argument("--keep-source", action="store_true", help="leave the source worktree in place")
+    parser.add_argument("--repo", help="the repo's main checkout on the target")
+    return parser.parse_args()
+
+
+def report_failure(address: str, target: str, error: Exception) -> None:
+    try:
+        link = board.find(terminal.load(address).canonical_tab)
+        if link:
+            board.note(link, f"Move to {label(target)} failed: {error}")
+    except HandoffError:
+        pass
+
+
+def main() -> int:
+    args = parse_args()
+    if args.machine not in known_machines():
+        print(f"handoff: unknown machine {args.machine}", file=sys.stderr)
+        return 2
+    LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    lock = (LOCK_DIR / f"handoff-{re.sub(r'[^A-Za-z0-9]', '-', args.terminal)}.lock").open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"handoff: {args.terminal} is already moving", file=sys.stderr)
+        return 1
+    try:
+        move(args.terminal, args.machine, args.summary, args.keep_source, args.repo)
+    except HandoffError as error:
+        say(f"Move failed: {error}")
+        report_failure(args.terminal, args.machine, error)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

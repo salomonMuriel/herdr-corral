@@ -1,0 +1,12 @@
+#!/bin/sh
+# What the Pi runs over ssh each night. A non-interactive ssh shell lacks the PATH that puts
+# uv in ~/.local/bin and neonctl under nvm, so this adds them before running the cleanup.
+PATH="$HOME/.local/bin:$PATH"
+if ! command -v neonctl >/dev/null 2>&1; then
+  for bin in "$HOME"/.nvm/versions/node/*/bin; do
+    [ -x "$bin/neonctl" ] && PATH="$PATH:$bin"
+  done
+fi
+export PATH
+cd "$(dirname "$0")" || exit 1
+exec ./cleanup --auto "$@"

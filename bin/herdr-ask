@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""herdr-ask: a Claude Code hook that labels this Herdr terminal while the agent waits on the person.
+
+  herdr-ask set     PermissionRequest: reads the hook's JSON on stdin and sets
+                    herdr.ask=plan|question|permission on the terminal
+  herdr-ask clear   any later event: removes the label once the agent moves on
+  herdr-ask prompt  UserPromptSubmit: clears as above, and when the prompt isn't one the
+                    board forwarded, the question a coordinator passed on with hb ask
+
+The window shows the label on the agent's row while Herdr reports it blocked.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
+LABEL = "herdr.ask"
+ASK_BY_TOOL = {"ExitPlanMode": "plan", "AskUserQuestion": "question"}
+# Clearing runs after every tool call, so a marker file saves an hc call when nothing is set.
+MARKERS = Path.home() / ".cache/herdr-projects/ask"
+# hb ask in a coordinator's session writes these; each holds the labelled terminal.
+COORDINATOR_MARKERS = Path.home() / ".cache/herdr-projects/coordinator-ask"
+COORDINATOR_LABELS = ("herdr.coordinator.ask", "herdr.coordinator.asked")
+# mods/projects/coordinator-watch.js starts every message it sends with this.
+BOARD_PREFIX = "[board]"
+
+
+def hc_path() -> Optional[str]:
+    found = shutil.which("hc")
+    if found:
+        return found
+    fallback = Path.home() / ".local/bin/hc"
+    return str(fallback) if fallback.exists() else None
+
+
+def label(terminal: str, value: str) -> None:
+    set_labels(terminal, [f"{LABEL}={value}"])
+
+
+def set_labels(terminal: str, pairs: list[str]) -> None:
+    hc = hc_path()
+    if not hc:
+        sys.exit("herdr-ask: hc not found")
+    result = subprocess.run([hc, "label", terminal, *pairs], capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        sys.exit(f"herdr-ask: hc label {terminal} failed: {result.stderr.strip()}")
+
+
+def ask_kind(hook_input: str) -> str:
+    try:
+        tool = json.loads(hook_input).get("tool_name", "")
+    except ValueError:
+        tool = ""
+    return ASK_BY_TOOL.get(tool, "permission")
+
+
+def set_ask(terminal: str) -> None:
+    label(terminal, ask_kind(sys.stdin.read()))
+    MARKERS.mkdir(parents=True, exist_ok=True)
+    (MARKERS / terminal).touch()
+
+
+def clear_ask(terminal: str) -> None:
+    marker = MARKERS / terminal
+    if not marker.exists():
+        return
+    label(terminal, "")
+    marker.unlink(missing_ok=True)
+
+
+def from_board(hook_input: str) -> bool:
+    try:
+        prompt = str(json.loads(hook_input).get("prompt") or "")
+    except ValueError:
+        return False
+    return BOARD_PREFIX in prompt[:200]
+
+
+def clear_coordinator_ask(terminal: str) -> None:
+    marker = COORDINATOR_MARKERS / terminal
+    if not marker.exists() or from_board(sys.stdin.read()):
+        return
+    asked_on = marker.read_text().strip() or terminal
+    set_labels(asked_on, [f"{name}=" for name in COORDINATOR_LABELS])
+    marker.unlink(missing_ok=True)
+
+
+def main(argv: list[str]) -> None:
+    terminal = os.environ.get("HC_TERMINAL_ID")
+    if not terminal:
+        return
+    command = argv[0] if argv else ""
+    if command == "set":
+        set_ask(terminal)
+        return
+    if command == "clear":
+        clear_ask(terminal)
+        return
+    if command == "prompt":
+        clear_ask(terminal)
+        clear_coordinator_ask(terminal)
+        return
+    sys.exit(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
