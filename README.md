@@ -315,3 +315,7 @@ The board's address and credentials live outside the repo in `~/.config/herdr-bo
 - The window breaks after a deploy: `ctrl-alt-shift-escape` switches to Herdr's default layout; fix on a branch, merge, deploy again. Run `herdr-app check <worktree>/mods/projects` before merging, and avoid circular imports between mod files, which can crash the window.
 - The Pi is down: a board on the Pi is down with it. If it won't come back soon, run `scripts/board-failover` on the standby's machine (see Board database).
 - Logs are in `~/.cache/herdr-projects/` (task-cleanup, code-review, handoff, approve, catch-up).
+
+## License
+
+Public domain ([the Unlicense](LICENSE)). Use it however you like; no attribution needed.
